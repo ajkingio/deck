@@ -27,7 +27,7 @@ if [ $resume = 0 ]; then
   grep -q 'FIXER:FILL' "$dir/brief.md" && die "brief still has FIXER:FILL markers; fill them in first: $dir/brief.md"
   command -v "$harness" >/dev/null 2>&1 || die "runner harness '$harness' is not installed"
   "$FIXER_BIN/fixer-trust" "$(job_get "$id" project)" --harness "$harness" --check >/dev/null ||
-    die "$harness doesn't trust project $(job_get "$id" project) yet, so the runner would stop at a trust dialog. Run: bin/fixer-trust $(job_get "$id" project) --harness $harness"
+    die "$harness doesn't trust project $(job_get "$id" project) yet, so the runner would stop at a trust dialog. With the client's word: bin/fixer-trust $(job_get "$id" project) --grant --harness $harness"
 
   project=$(job_get "$id" project)
   ppath=$(project_get "$project" path)

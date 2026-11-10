@@ -180,17 +180,32 @@ fi
 step "Folder trust"
 note "Each agent asks once whether you trust a repository, and runners can't answer that."
 note "Trust is per repository, so one answer covers every runner worktree of a project."
+note "Saying yes writes that agent's own trust record for the project (backed up first)."
+
+# Grant on the client's yes; if fixer can't write it, offer the agent's own dialog.
+trust_now() { # <label> <harness> <fixer-trust target args...>
+  local label=$1 h=$2 out; shift 2
+  confirm "Trust $label for $h now?" Y || return 0
+  if out=$("$FIXER_BIN/fixer-trust" "$@" --grant --yes --harness "$h" 2>&1); then
+    printf '%s\n' "$out" | sed 's/^/  /'; return 0
+  fi
+  printf '%s\n' "$out" | sed 's/^fixer: //; s/^/  /'
+  if confirm "Open $h there so you can answer its trust dialog yourself instead?" Y; then
+    "$FIXER_BIN/fixer-trust" "$@" --harness "$h" | sed 's/^/  /'
+  fi
+}
+
 if harness_trusts "$fixer_h" "$FIXER_ROOT"; then
   ok "$fixer_h trusts the fixer folder"
-elif confirm "Trust the fixer folder for $fixer_h now, so your first launch is clean?" Y; then
-  "$FIXER_BIN/fixer-trust" --path "$FIXER_ROOT" --harness "$fixer_h" | sed 's/^/  /'
+else
+  trust_now "the fixer folder" "$fixer_h" --path "$FIXER_ROOT"
 fi
 
 if [ -n "$(ls "$FIXER_PROJECTS" 2>/dev/null)" ]; then
   for f in "$FIXER_PROJECTS"/*.conf; do
     p=$(conf_get "$f" name)
     if harness_trusts "$runner_h" "$(conf_get "$f" path)"; then ok "$runner_h trusts project $p"
-    elif confirm "Trust project $p for $runner_h now?" Y; then "$FIXER_BIN/fixer-trust" "$p" --harness "$runner_h" | sed 's/^/  /'; fi
+    else trust_now "project $p" "$runner_h" "$p"; fi
   done
 fi
 while confirm "Register a project now? (you can also just ask the Fixer later)" N; do
@@ -199,7 +214,7 @@ while confirm "Register a project now? (you can also just ask the Fixer later)" 
   out=$("$FIXER_BIN/fixer-project" add "$src" 2>&1) || { bad "$out"; continue; }
   ok "$out"
   p=$(printf '%s' "$out" | sed -E 's/^registered ([^:]+):.*/\1/')
-  if confirm "Trust $p for $runner_h now?" Y; then "$FIXER_BIN/fixer-trust" "$p" --harness "$runner_h" | sed 's/^/  /'; fi
+  trust_now "$p" "$runner_h" "$p"
 done
 
 # ---------------------------------------------------------------- launcher

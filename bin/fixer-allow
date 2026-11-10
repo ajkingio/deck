@@ -9,7 +9,8 @@
 # committed. Left out on purpose, so they always ask: fixer-open (pushing and
 # opening PRs/MRs), fixer-land (merging),
 # fixer-teardown (it can discard work), fixer-project add (it clones),
-# fixer-trust, and fixer-allow itself.
+# fixer-trust (--grant writes the harness's trust config), and fixer-allow
+# itself. Never add a rule here that matches fixer-trust.
 . "$(dirname "$0")/fixer-lib.sh"
 need jq
 
@@ -44,4 +45,4 @@ else
 fi
 mv "$tmp" "$f"
 echo "$msg $f"
-echo "Still asks every time: fixer-open, fixer-land, fixer-teardown, fixer-project add, fixer-trust."
+echo "Still asks every time: fixer-open, fixer-land, fixer-teardown, fixer-project add, fixer-trust (including --grant)."
