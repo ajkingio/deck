@@ -1,8 +1,9 @@
 ---
 name: cyberpunk-fixer
 description: Cyberpunk fixer. You're the client; the agent is your Fixer, hiring mercs to take your gigs.
-calm: hex-stream
+calm: glitch
 calm_command: lowkey
+calm_words: making calls, pulling favors, checking the board, sizing up the merc, haggling the price, greasing palms
 crew_label: MERCS
 launcher: holocall
 greeting: got a job for you

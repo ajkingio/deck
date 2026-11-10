@@ -62,13 +62,13 @@ Each worker (a daemon, in this theme) shows up as its own Herdr workspace named 
 | `/sitrep` | What needs you, what's running, what's queued, what landed |
 | `/debrief` | Review what the Fixer wants to remember, and approve or reject each item |
 | `/retheme` | Change the theme |
-| `/ghost` | Quiet mode (Claude Code only): hide tool-call clutter, animate the working row, show the crew. Named by the theme; `/calm` works in every theme |
+| `/ghost` | Quiet mode (Claude Code only, on by default): hide tool-call clutter, animate the working row, show the crew. `/ghost <animation>` switches the animation, `/ghost list` shows them. Named by the theme; `/calm` works in every theme |
 
 Codex uses `$sitrep` instead of `/sitrep`.
 
 ### Quiet mode
 
-Quiet mode (Claude Code) turns the transcript into just the conversation. Each theme names its command, and `/calm` works in all of them:
+Quiet mode (Claude Code, on by default) turns the transcript into just the conversation. Each theme names its command, and `/calm` works in all of them:
 
 | Theme | Command |
 | --- | --- |
@@ -80,11 +80,20 @@ Quiet mode (Claude Code) turns the transcript into just the conversation. Each t
 With it on:
 
 - Tool calls, their results, and the watcher's wake-ups are hidden. ctrl+o still shows everything, and the model's context isn't touched.
-- The "working…" spinner becomes the theme's animation. Both cyberpunk themes use a hex stream with a glitch column sweeping across it.
+- The "working…" spinner becomes an animation. Each theme has a default, and `/ghost <name>` picks another:
+
+  | Animation | Looks like | Default for |
+  | --- | --- | --- |
+  | `hex-stream` | two rows of drifting hex, a magenta glitch column sweeping across | cyberpunk-netrunner |
+  | `ice-breach` | a daemon `◢▶` rides a data line, dissolving the ICE wall ahead (`█▓▒░`) | |
+  | `glitch` | the theme's verbs, each arriving scrambled and resolving: `◢ slic?&$ !<>` → `◢ slicing ICE...` | cyberpunk-fixer |
+  | `tide` | rolling swell, a long wave with a shorter one riding it | nautical |
+  | `pulse` | a bright bar sweeping back and forth along a dotted line | plain |
+  | `stock` | Claude's own spinner | |
 - A band above the prompt lists live workers under the theme's name for them: `▌DAEMONS ▸ api-rate-limit ⟨running⟩ ▸ api-export-scan ⟨BLOCKED⟩`.
 - A dim note lands in the transcript when a runner reports: `⚡ api-rate-limit: done · https://…`. Only you see it; the model doesn't.
 
-The choice is saved as `calm=on|off` in `config/fixer.conf`. Quiet mode is a Claude Code mod (`.claude/mods/fixer-calm`) built on Claude Code's early-access mod API, so it can break when Claude Code updates. A custom theme sets its command with `calm_command:`, its band title with `crew_label:`, and its animation with `calm: hex-stream` (anything else keeps the stock spinner).
+The choice is saved as `calm=on|off` (and `calm_animation=` for your pick) in `config/fixer.conf`. Quiet mode is a Claude Code mod (`.claude/mods/fixer-calm`) built on Claude Code's early-access mod API, so it can break when Claude Code updates. A custom theme sets its command with `calm_command:`, its band title with `crew_label:`, its default animation with `calm:`, and the verbs `glitch` cycles through with `calm_words:` (comma-separated).
 
 ## How it works
 

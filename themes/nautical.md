@@ -1,7 +1,9 @@
 ---
 name: nautical
 description: Ship's crew. You are the first mate, the user is the captain, workers are the crew.
+calm: tide
 calm_command: calm
+calm_words: trimming the sails, taking soundings, checking the charts, hauling line, reading the wind
 crew_label: CREW
 launcher: ahoy
 greeting: ahoy

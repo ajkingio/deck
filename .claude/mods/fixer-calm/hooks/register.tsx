@@ -4,22 +4,25 @@
 //   - tool-call rows, tool results and folded tool groups draw nothing
 //     (ctrl+o still shows everything; the model's context is untouched)
 //   - the watcher's own wake-up notifications draw nothing
-//   - the working spinner becomes the active theme's animation
-//     (theme frontmatter `calm: hex-stream`; anything else keeps the stock spinner)
+//   - the working spinner becomes an animation (hooks/animations.ts): the
+//     theme's `calm:` default, or the client's pick (`/calm <animation>`,
+//     stored as calm_animation=), `stock` keeping Claude's own spinner
 //   - a crew band above the prompt lists live runners
 //   - a dim note is added to the transcript when a runner reports
 //     (a display-only notice: the model never reads it)
 //
-// The choice is stored as calm=on|off in config/fixer.conf. Outside a
-// configured fixer home the mod does nothing at all.
+// The choice is stored as calm=on|off in config/fixer.conf, on unless it says
+// off. Outside a configured fixer home the mod does nothing at all.
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { CrewEntry } from '../types'
+import { ANIMATIONS, ANIMATION_NAMES } from './animations'
 
 const calm = atom({ plugin: 'fixer-calm', key: 'calm' } as const, false)
-const sprite = atom({ plugin: 'fixer-calm', key: 'sprite' } as const, 'none')
+const sprite = atom({ plugin: 'fixer-calm', key: 'sprite' } as const, 'stock')
+const words = atom({ plugin: 'fixer-calm', key: 'words' } as const, [] as string[], { shape: 'words-1' })
 const frame = atom({ plugin: 'fixer-calm', key: 'frame' } as const, 0)
 const crew = atom({ plugin: 'fixer-calm', key: 'crew' } as const, [] as CrewEntry[], { shape: 'crew-1' })
 const label = atom({ plugin: 'fixer-calm', key: 'label' } as const, 'CREW')
@@ -29,7 +32,8 @@ const command = atom({ plugin: 'fixer-calm', key: 'command' } as const, 'calm')
 // (`calm_command:` in its frontmatter: ghost, lowkey, focus). Commands can't be
 // unregistered, so a name from an earlier theme stays usable but is hidden.
 const registered = new Set<string>()
-const DESCRIPTION = 'Quiet mode: hide tool-call clutter, show the crew band and worker notes'
+const DESCRIPTION = 'Quiet mode: hide tool-call clutter, show the crew band and worker notes. Add an animation name to switch it, or "list"'
+const HINT = '[animation | list]'
 
 const CONF = 'config/fixer.conf'
 const JOBS = 'data/jobs'
@@ -45,52 +49,6 @@ const GREEN = '#3ddc84'
 const WATCH_MARK = 'fixer-wait'
 
 type $ = EngineInterface
-
-// ---------------------------------------------------------------- the sprite
-
-function hash(n: number): number {
-  let x = (n | 0) ^ 0x9e3779b9
-  x = Math.imul(x ^ (x >>> 16), 0x85ebca6b)
-  x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35)
-  return (x ^ (x >>> 16)) >>> 0
-}
-
-const HEX = '0123456789ABCDEF'
-
-/** One cell of the hex stream: each column ticks over at its own pace. */
-function cell(col: number, row: number, f: number): string {
-  const seed = hash(col * 7919 + row * 104729)
-  const pace = 3 + (seed % 6)
-  const tick = Math.floor((f + (seed % 17)) / pace)
-  const v = hash(seed ^ tick)
-  if (v % 7 < 2) return ' '
-  return v % 3 === 0 ? (v % 2 ? '1' : '0') : HEX.charAt(v % 16)
-}
-
-/**
- * Two rows of drifting hex and binary, with a glitch column that sweeps left
- * to right. Returns each row as the text before the glitch, the glitch cells,
- * and the text after.
- */
-export function hexStream(width: number, f: number): Array<[string, string, string]> {
-  const w = Math.max(8, width)
-  const sweep = w + 16
-  const g = Math.floor(f * 1.5) % sweep - 8 // glitch column; off-screen part of the time
-  const rows: Array<[string, string, string]> = []
-  for (let r = 0; r < 2; r++) {
-    let before = ''
-    let glitch = ''
-    let after = ''
-    for (let c = 0; c < w; c++) {
-      if (c === g) glitch += '▌'
-      else if (c === g + 1) glitch += cell(c, r, f * 3) === ' ' ? HEX.charAt(hash(f + r) % 16) : cell(c, r, f * 3)
-      else if (c < g) before += cell(c, r, f)
-      else after += cell(c, r, f)
-    }
-    rows.push([before, glitch, after])
-  }
-  return rows
-}
 
 // ------------------------------------------------------------- fixer files
 
@@ -124,14 +82,20 @@ async function themeField($: $, theme: string | undefined, key: string): Promise
 
 async function ensureCommand($: $, name: string): Promise<void> {
   if (registered.has(name) || !/^[a-z][a-z0-9-]{0,31}$/.test(name)) return
-  await $.command.register({ name, description: DESCRIPTION })
+  await $.command.register({ name, description: DESCRIPTION, argumentHint: HINT })
   registered.add(name)
 }
 
-/** Reads the active theme's animation, crew-band label and command name into state. */
+/** Reads the animation (client's pick, else the theme's), its words, the crew-band label and command name into state. */
 async function loadTheme($: $): Promise<void> {
   const conf = parseConf((await readText($, CONF)) ?? '')
-  const spriteName = (await themeField($, conf.theme, 'calm')) ?? 'none'
+  const picked = conf.calm_animation || (await themeField($, conf.theme, 'calm')) || 'stock'
+  const spriteName = ANIMATION_NAMES.includes(picked) ? picked : 'stock'
+  const wordList = ((await themeField($, conf.theme, 'calm_words')) ?? '')
+    .split(',')
+    .map(w => w.trim())
+    .filter(w => w !== '')
+  if (JSON.stringify(await read($, words)) !== JSON.stringify(wordList)) await update($, words, () => wordList)
   const labelText = ((await themeField($, conf.theme, 'crew_label')) ?? 'CREW').toUpperCase()
   const name = (await themeField($, conf.theme, 'calm_command')) ?? 'calm'
   if ((await read($, sprite)) !== spriteName) await update($, sprite, () => spriteName)
@@ -144,11 +108,12 @@ async function loadTheme($: $): Promise<void> {
   }
 }
 
-async function writeCalm($: $, on: boolean): Promise<boolean> {
+async function writeConf($: $, values: Record<string, string>): Promise<boolean> {
   const text = await readText($, CONF)
   if (text === undefined) return false
-  const lines = text.split('\n').filter(l => !l.startsWith('calm=') && l !== '')
-  lines.push(`calm=${on ? 'on' : 'off'}`)
+  const keys = Object.keys(values)
+  const lines = text.split('\n').filter(l => l !== '' && !keys.some(k => l.startsWith(`${k}=`)))
+  for (const k of keys) lines.push(`${k}=${values[k]}`)
   try {
     await $.fs.write(CONF, lines.join('\n') + '\n')
     return true
@@ -254,7 +219,7 @@ export const register: Register = on => {
     if (text === undefined) return result // not a configured fixer home
     configured = true
     const conf = parseConf(text)
-    await update($, calm, () => conf.calm === 'on')
+    await update($, calm, () => conf.calm !== 'off')
     await loadTheme($) // also registers /calm and the theme's name for it
     poller?.cancel()
     await poll($) // seeds what has been seen, so old events don't replay
@@ -268,14 +233,30 @@ export const register: Register = on => {
     await loadTheme($)
     const name = await read($, command)
     const title = name.charAt(0).toUpperCase() + name.slice(1)
-    const now = !(await read($, calm))
-    if (!(await writeCalm($, now))) {
+    const arg = e.args.trim().toLowerCase()
+
+    if (arg === 'list') {
+      const current = await read($, sprite)
+      $.ui.toast(`Animations: ${ANIMATION_NAMES.map(a => (a === current ? `[${a}]` : a)).join(', ')}. Pick one with /${name} <name>`)
+      return {}
+    }
+    if (arg !== '' && !ANIMATION_NAMES.includes(arg)) {
+      $.ui.toast(`No animation called "${arg}". Try: ${ANIMATION_NAMES.join(', ')}`)
+      return {}
+    }
+
+    // An animation name switches to it (and turns quiet mode on); no argument toggles.
+    const now = arg !== '' ? true : !(await read($, calm))
+    const values: Record<string, string> = { calm: now ? 'on' : 'off' }
+    if (arg !== '') values.calm_animation = arg
+    if (!(await writeConf($, values))) {
       $.ui.toast(`${title} unchanged: could not write config/fixer.conf`)
       return {}
     }
     await update($, calm, () => now)
+    await loadTheme($)
     if (!now) stopAnimation()
-    $.ui.toast(`${title} ${now ? 'on' : 'off'}`)
+    $.ui.toast(arg !== '' ? `${title} on · ${arg}` : `${title} ${now ? 'on' : 'off'}`)
     return {}
   })
 
@@ -289,7 +270,7 @@ export const register: Register = on => {
   // The animation runs only while a turn does.
   on('turn.start', async ($, e, next) => {
     stopAnimation()
-    if (configured && (await read($, calm)) && (await read($, sprite)) !== 'none') {
+    if (configured && (await read($, calm)) && ANIMATIONS[await read($, sprite)]) {
       animation = $.clock.every(FRAME_MS, () => void update($, frame, n => (n + 1) % 1_000_000).catch(() => undefined))
     }
     return next(e)
@@ -304,17 +285,21 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Spinner' }, async ($, e, next) => {
-    if (!configured || !(await read($, calm)) || (await read($, sprite)) !== 'hex-stream') return next(e)
+    if (!configured || !(await read($, calm))) return next(e)
+    const animate = ANIMATIONS[await read($, sprite)]
+    if (!animate) return next(e)
     const { Box, Text } = $.ui.resolve(e)
-    const width = (e.viewport?.columns ?? 80) - 4
-    const rows = hexStream(width, await read($, frame))
+    const width = Math.max(8, (e.viewport?.columns ?? 80) - 4)
+    const rows = animate(width, await read($, frame), await read($, words))
     return (
       <Box flexDirection="column" paddingLeft={2} marginTop={1}>
-        {rows.map(([before, glitch, after]) => (
+        {rows.map(segs => (
           <Text>
-            <Text color={CYAN} dimColor>{before}</Text>
-            <Text color={MAGENTA} bold>{glitch}</Text>
-            <Text color={CYAN} dimColor>{after}</Text>
+            {segs.map(s => (
+              <Text color={s.color} bold={s.bold} dimColor={s.dim}>
+                {s.text}
+              </Text>
+            ))}
           </Text>
         ))}
       </Box>

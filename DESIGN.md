@@ -179,16 +179,16 @@ Onboarding (runs automatically when `config/` is absent): pick a theme (or descr
 
 ## Calm mode (Claude Code)
 
-A mod at `.claude/mods/fixer-calm`, auto-loaded through `.agents/skills/fixer-calm` (a symlink, the same pattern firstmate uses). It does nothing unless `config/fixer.conf` exists.
+A mod at `.claude/mods/fixer-calm`, auto-loaded through `.agents/skills/fixer-calm` (a symlink, the same pattern firstmate uses). It does nothing unless `config/fixer.conf` exists. On by default: only `calm=off` turns it off.
 
 | Hook | With calm on |
 | --- | --- |
 | `ui.render` ToolUse / ToolResult / ToolGroup | drawn as nothing (passes through when `isExpanded`, i.e. ctrl+o) |
 | `ui.render` UserMessage | the watcher's task-notification row (its description starts `fixer-wait:`) drawn as nothing |
-| `ui.render` Spinner | the theme's animation (`calm:` in theme frontmatter); both cyberpunk themes = `hex-stream` |
+| `ui.render` Spinner | an animation from `hooks/animations.ts` (pure functions of width and frame): `hex-stream`, `ice-breach`, `glitch` (cycles the theme's `calm_words`), `tide`, `pulse`, or `stock`. The client's pick (`calm_animation=`) wins over the theme's `calm:` default |
 | `ui.render` AbovePrompt | crew band (titled by the theme's `crew_label`) from `data/jobs/*/job.conf`, refined by `herdr agent list` (a runner at a dialog shows `DIALOG`) |
 | `$.session.append` system notice | one dim note per new `status.log` line; display-only, the model never reads it |
-| `/calm` + the theme's `calm_command` (`/ghost`, `/lowkey`, `/focus`) | toggles `calm=` in `config/fixer.conf`, confirms with a toast; `command.describe` lists only the current theme's name, and an earlier theme's name stays usable but hidden (commands can't be unregistered) |
+| `/calm` + the theme's `calm_command` (`/ghost`, `/lowkey`, `/focus`) | toggles `calm=` in `config/fixer.conf`; with an argument it switches the animation (`calm_animation=`, turning quiet mode on), `list` shows them; confirms with a toast; `command.describe` lists only the current theme's name, and an earlier theme's name stays usable but hidden (commands can't be unregistered) |
 
 Polls job files every 3s; the animation timer runs only during a turn. Seen status-log counts are kept in `$.store` so a restart doesn't replay old events. Assistant narration is not hidden: the API gives no reliable way to tell a mid-turn note from the final reply, and the contract already tells the Fixer not to narrate.
 

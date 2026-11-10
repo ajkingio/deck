@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { hexStream } from '../hooks/register'
+import { ANIMATIONS, hexStream } from '../hooks/animations'
 
 const FILES: Record<string, string> = {
   'config/fixer.conf': 'theme=cyberpunk-netrunner\nclient_name=runner\ncalm=on\n',
@@ -16,18 +16,24 @@ const SPINNER = {
   props: { word: 'Sauteing', message: null, suffix: '…', mode: 'requesting' },
 } as const
 
-test('the hex stream fills the width in two rows, with one sweeping glitch column', () => {
-  for (const f of [0, 7, 40, 500]) {
-    const rows = hexStream(60, f)
-    expect(rows.length).toBe(2)
-    for (const [before, glitch, after] of rows) {
-      expect(before.length + glitch.length + after.length).toBe(60)
-      expect(/^[0-9A-F ]*$/.test(before + after)).toBe(true)
+test('every animation fills exactly the row width, at any frame and width', () => {
+  for (const [name, animate] of Object.entries(ANIMATIONS)) {
+    for (const width of [8, 37, 120]) {
+      for (const f of [0, 1, 7, 40, 333, 5000]) {
+        const rows = animate(width, f, ['slicing ICE', 'tracing'])
+        expect(rows.length > 0).toBe(true)
+        for (const r of rows) {
+          const text = r.map(s => s.text).join('')
+          if ([...text].length !== width) throw new Error(`${name} width ${width} frame ${f}: ${[...text].length} cells`)
+        }
+      }
     }
   }
-  // Somewhere in a sweep the glitch column is on screen.
-  const seen = Array.from({ length: 80 }, (_, f) => hexStream(60, f)[0]![1]).filter(g => g.startsWith('▌'))
-  expect(seen.length > 0).toBe(true)
+})
+
+test('the hex stream sweeps a glitch column across', () => {
+  const seen = Array.from({ length: 80 }, (_, f) => hexStream(60, f, [])[0]!.some(s => s.text.includes('▌')))
+  expect(seen.some(Boolean)).toBe(true)
 })
 
 test('with calm on in a fixer home, the spinner becomes the hex stream', async ($, on) => {
@@ -130,4 +136,30 @@ test('the theme names the toggle: /ghost registers beside /calm and turns calm o
 
   await $.command.run({ command: 'ghost', args: '' })
   expect(writes.some(w => w.includes('calm=off'))).toBe(true)
+})
+
+test('naming an animation switches to it and saves the pick', async ($, on) => {
+  const writes: string[] = []
+  on('fs.read', (_, e) => {
+    const key = Object.keys(FILES).find(k => (e.path as string).endsWith('/' + k) || e.path === k)
+    const text = key === undefined ? undefined : FILES[key]
+    if (text === undefined) throw new Error('missing')
+    return { value: text }
+  })
+  on('fs.list', () => ({ value: [] }))
+  on('fs.write', (_, e) => (writes.push(e.text as string), { value: undefined }))
+  const store = new Map<string, unknown>()
+  on('store.get', (_, e) => ({ value: store.get(e.key as string) }))
+  on('store.set', (_, e) => (store.set(e.key as string, e.value), { value: undefined }))
+  on('command.register', (_, e) => ({ value: { command: e.name } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await $.command.run({ command: 'ghost', args: 'ice-breach' })
+  const last = writes[writes.length - 1] ?? ''
+  expect(last.includes('calm_animation=ice-breach')).toBe(true)
+  expect(last.includes('calm=on')).toBe(true)
+
+  await $.command.run({ command: 'ghost', args: 'nope' })
+  expect(writes.length).toBe(1) // an unknown name changes nothing
 })

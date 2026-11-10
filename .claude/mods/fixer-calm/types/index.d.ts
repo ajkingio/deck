@@ -13,8 +13,10 @@ declare module 'claude-code' {
     'fixer-calm': {
       /** Whether calm is on (config/fixer.conf calm=on). */
       calm: boolean
-      /** The working-row animation the active theme asks for (`hex-stream`), or `none` for the stock spinner. */
+      /** The working-row animation: a name in hooks/animations.ts, or `stock` for Claude's own spinner. */
       sprite: string
+      /** The theme's verbs for the `glitch` animation (`calm_words:`). */
+      words: Shaped<string[]>
       /** Animation frame counter; advances while a turn runs with calm on. */
       frame: number
       /** The crew band's title, from the theme's `crew_label` (DAEMONS, MERCS, CREW). */

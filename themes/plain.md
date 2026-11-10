@@ -1,7 +1,9 @@
 ---
 name: plain
 description: No theme. A clear, professional coordinator.
+calm: pulse
 calm_command: focus
+calm_words: working, reading, planning, checking, writing
 crew_label: WORKERS
 launcher: fixer
 greeting: start

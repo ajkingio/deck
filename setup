@@ -116,7 +116,7 @@ conf_set "$FIXER_CONF" runner_harness "$runner_h"
 conf_set "$FIXER_CONF" default_mode "$mode"
 conf_set "$FIXER_CONF" claude_permission_mode "$(cur claude_permission_mode auto)"
 conf_set "$FIXER_CONF" notify "$(cur notify on)"
-conf_set "$FIXER_CONF" calm "$(cur calm off)"
+conf_set "$FIXER_CONF" calm "$(cur calm on)"
 conf_set "$FIXER_CONF" herdr_session "$(cur herdr_session fixer)"
 [ -n "$(cur onboarded)" ] || conf_set "$FIXER_CONF" onboarded no
 ok "saved config/fixer.conf"

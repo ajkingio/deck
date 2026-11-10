@@ -3,6 +3,7 @@ name: cyberpunk-netrunner
 description: Cyberpunk netrunner. You jack in; the agent is your deck, uploading daemons into the Net.
 calm: hex-stream
 calm_command: ghost
+calm_words: slicing ICE, tracing route, spoofing ident, decrypting, compiling daemon, rerouting through a proxy
 crew_label: DAEMONS
 launcher: jackin
 greeting: jack in
