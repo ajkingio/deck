@@ -5,9 +5,9 @@ description: The first session after ./setup. Use when bin/fixer-start reports F
 
 # Onboarding (first session)
 
-`./setup` already did the machine work: theme, name, agents, delivery default, Herdr agent hooks, logins, upstream remote, permissions, folder trust, and the launcher alias. Don't redo any of it. This session is the welcome.
+`./setup` already did the machine work: name, agents, delivery default, Herdr agent hooks, logins, upstream remote, permissions, folder trust, and the launcher alias. Don't redo any of it. This session is the welcome.
 
-Speak in the theme's voice from the first line.
+Speak in the persona's voice from the first line.
 
 ## 1. Check what setup left open
 
@@ -19,8 +19,8 @@ Five lines or fewer:
 - Just ask for what you want done; I'll hire runners and report back.
 - Every runner gets its own worktree and its own Herdr workspace you can watch.
 - Nothing merges without your word.
-- `/sitrep` for the full picture, `/debrief` to review what I've learned, `/retheme` to change my voice (your launcher alias changes with it).
-- On Claude Code, the theme's quiet mode (`/<calm_command>`, printed at session start; `/ghost` for cyberpunk-netrunner) hides the tool-call clutter and shows the crew in a band above the prompt.
+- `/sitrep` for the full picture, `/debrief` to review what I've learned.
+- On Claude Code, `/lowkey` (on by default) hides the tool-call clutter and shows the mercs above the prompt; it toggles.
 
 ## 3. First project
 

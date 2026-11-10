@@ -7,7 +7,7 @@ description: Status report on all fixer jobs - what needs the user, what's runni
 
 1. Run `bin/fixer-sitrep --forge`.
 2. For each job under "Needs the client", read what's needed: the last status line, and `data/jobs/<id>/report.md` if it exists. For a `dialog`, read the pane with `herdr agent read <id> --source recent-unwrapped --lines 60`.
-3. Reply in the theme's voice, in this order, skipping empty sections:
+3. Reply in the persona's voice, in this order, skipping empty sections:
    - **Needs you**: each item as one line with the decision or action and your recommendation (for review-ready gigs: link, CI, risk).
    - **Running**: one line per job.
    - **Queued**: one line per job, plus what it's waiting on.

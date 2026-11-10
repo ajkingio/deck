@@ -1,20 +1,16 @@
 #!/usr/bin/env bash
-# fixer-launcher: manage the shell alias that starts fixer (e.g. `jackin`).
+# fixer-launcher: manage the shell alias that starts fixer (`holocall`).
 #
-#   fixer-launcher install   write the alias for the current theme (replaces this clone's old one)
+#   fixer-launcher install   write the alias (replaces this clone's old one)
 #   fixer-launcher remove    take this clone's alias out
 #   fixer-launcher show      print the alias, rc file and opening line
 #
-# The alias name comes from the theme's `launcher:` frontmatter
-# (cyberpunk-netrunner: jackin). It runs bin/fixer-launch. The block in the rc file is fenced with
+# The alias name is FIXER_ALIAS in bin/fixer-lib.sh. It runs bin/fixer-launch. The block in the rc file is fenced with
 # markers naming this clone's path, so several clones never clobber each other.
 # Supports zsh (~/.zshrc), bash (~/.bashrc) and fish (conf.d/fixer-<hash>.fish).
 . "$(dirname "$0")/fixer-lib.sh"
 
-theme=$(conf_get "$FIXER_CONF" theme cyberpunk-netrunner)
-alias_name=$(theme_get "$theme" launcher)
-[ -n "$alias_name" ] || alias_name=fixer
-printf '%s' "$alias_name" | grep -Eq '^[A-Za-z][A-Za-z0-9_-]*$' || die "theme $theme has an invalid launcher name: $alias_name"
+alias_name=$FIXER_ALIAS
 launch="$FIXER_BIN/fixer-launch"
 tag="fixer ($FIXER_ROOT)"
 hash=$(printf '%s' "$FIXER_ROOT" | cksum | cut -d' ' -f1)
@@ -55,7 +51,6 @@ install)
     [ -s "$rc" ] && [ -n "$(tail -c1 "$rc")" ] && echo >>"$rc"
     printf '# >>> %s >>>\nalias %s=%s\n# <<< %s <<<\n' "$tag" "$alias_name" "'$launch'" "$tag" >>"$rc"
   fi
-  conf_set "$FIXER_CONF" launcher "$alias_name"
   echo "installed alias '$alias_name' in $rc"
   echo "open a new terminal (or run: source $rc) to use it"
   ;;
@@ -66,7 +61,7 @@ remove)
 show)
   echo "alias:    $alias_name -> $launch"
   echo "rc file:  $rc"
-  echo "greeting: $(theme_get "$theme" greeting)"
+  echo "greeting: $FIXER_GREETING"
   if [ -f "$rc" ] && grep -qF "# >>> $tag >>>" "$rc"; then echo "status:   installed"; else echo "status:   not installed"; fi
   ;;
 *)

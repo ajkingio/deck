@@ -2,9 +2,9 @@
 
 **Talk to one agent. It hires the crew.**
 
-fixer turns the coding agent you already use into the one agent you talk to: your deck, your Fixer, or your first mate, depending on the theme. You say what you want; it hires runner agents to do the work, each in its own git worktree and its own [Herdr](https://herdr.dev) workspace, supervises them, and comes back with finished PRs, merged branches, or investigation reports. It only interrupts you for real decisions, and nothing merges without your word.
+fixer turns the coding agent you already use into your **Fixer**: the one agent you talk to. You're the client. You say what you want; the Fixer hires merc agents to do the work, each in its own git worktree and its own [Herdr](https://herdr.dev) workspace, supervises them, and comes back with finished PRs, merged branches, or investigation reports. It only interrupts you for real decisions, and nothing merges without your word.
 
-It's a lightweight take on [firstmate](https://github.com/kunchenguid/firstmate): the same idea, cut down to a starting point you can read in an afternoon and make your own. It ships with two cyberpunk themes (netrunner by default, and fixer), a nautical one and a plain one, and you can write your own.
+It's a lightweight take on [firstmate](https://github.com/kunchenguid/firstmate): the same idea, cut down to a starting point you can read in an afternoon and make your own. The Fixer's voice lives in `persona.md`; edit it if you want a different one.
 
 There's nothing to install. The repo is the tool: an `AGENTS.md` contract, a few skills, and a handful of small shell scripts.
 
@@ -24,36 +24,27 @@ There's nothing to install. The repo is the tool: an `AGENTS.md` contract, a few
    cd fixer
    ./setup
    ```
-   Setup checks your machine and asks for a theme, what to call you, and which agent to use. It also offers Herdr's agent hooks, GitHub/GitLab logins, an `upstream` remote, fewer permission prompts, and folder trust for fixer and your projects. Last, it installs your launcher alias. Anything that touches files outside this folder is asked about first, and you can rerun it any time.
-3. Open a new terminal and launch:
+   Setup checks your machine and asks what to call you and which agent to use. It also offers Herdr's agent hooks, GitHub/GitLab logins, an `upstream` remote, fewer permission prompts, and folder trust for fixer and your projects. Last, it installs the `holocall` alias. Anything that touches files outside this folder is asked about first, and you can rerun it any time.
+3. Launch:
    ```sh
-   jackin
+   holocall
    ```
-   That opens a Herdr session named `fixer` in this folder and starts your agent with "jack in". If a `fixer` session already exists, it asks whether to open it or start a new one. Starting a new one replaces the old session, and it asks again first if runners are still live in it.
-
-The alias comes from the theme, and `/retheme` updates it:
-
-| Theme | You are | The agent is | Its crew | Launcher |
-| --- | --- | --- | --- | --- |
-| `cyberpunk-netrunner` (default) | the netrunner | your deck | daemons | `jackin` |
-| `cyberpunk-fixer` | the client | your Fixer | mercs | `holocall` |
-| `nautical` | the captain | the first mate | the crew | `ahoy` |
-| `plain` | you | a coordinator | workers | `fixer` |
+   That opens a Herdr session named `fixer` in this folder and starts your agent with "got a job for you". If a `fixer` session already exists, it asks whether to open it or start a new one. Starting a new one replaces the old session, and it asks again first if mercs are still live in it.
 
 Then just ask:
 
 ```
 > add rate limiting to the login endpoint in api, and figure out why the nightly export is slow
 
-  Two daemons uploaded, runner. `api-rate-limit` is on the run; `api-export-scan` is tracing the export.
+  Two jobs posted, client. Merc `api-rate-limit` is on the gig; `api-export-recon` is digging into the export.
   ...
-  Breach complete: PR's up, CI green. https://github.com/you/api/pull/42 (rate limiting, low risk).
-  Scan's back: the export does one query per row. Upload a daemon to batch it?
+  Preem. PR's up and CI is green: https://github.com/you/api/pull/42 (rate limiting, low risk).
+  Recon's back: the export does one query per row. Want a gig to batch it?
 
 > merge it, and yes
 ```
 
-Each worker (a daemon, in this theme) shows up as its own Herdr workspace named after its job, so you can watch any of them or step in.
+Each merc shows up as its own Herdr workspace named after its job, so you can watch any of them or step in.
 
 ## Commands
 
@@ -61,39 +52,20 @@ Each worker (a daemon, in this theme) shows up as its own Herdr workspace named 
 | --- | --- |
 | `/sitrep` | What needs you, what's running, what's queued, what landed |
 | `/debrief` | Review what the Fixer wants to remember, and approve or reject each item |
-| `/retheme` | Change the theme |
-| `/ghost` | Quiet mode (Claude Code only, on by default): hide tool-call clutter, animate the working row, show the crew. `/ghost <animation>` switches the animation, `/ghost list` shows them. Named by the theme; `/calm` works in every theme |
+| `/lowkey` | Claude Code only, on by default: hide tool-call clutter and show the mercs. Toggles |
 
 Codex uses `$sitrep` instead of `/sitrep`.
 
-### Quiet mode
+### Lowkey
 
-Quiet mode (Claude Code, on by default) turns the transcript into just the conversation. Each theme names its command, and `/calm` works in all of them:
-
-| Theme | Command |
-| --- | --- |
-| cyberpunk-netrunner | `/ghost` |
-| cyberpunk-fixer | `/lowkey` |
-| nautical | `/calm` |
-| plain | `/focus` |
-
-With it on:
+With `/lowkey` on (Claude Code), the transcript is just the conversation:
 
 - Tool calls, their results, and the watcher's wake-ups are hidden. ctrl+o still shows everything, and the model's context isn't touched.
-- The "working…" spinner becomes an animation. Each theme has a default, and `/ghost <name>` picks another:
+- The "working…" spinner becomes a hex stream: two rows of drifting hex with a magenta glitch column sweeping across.
+- A band above the prompt lists live mercs: `▌MERCS ▸ api-rate-limit ⟨running⟩ ▸ api-export-recon ⟨BLOCKED⟩`.
+- A dim note lands in the transcript when a merc reports: `⚡ api-rate-limit: done · https://…`. Only you see it; the model doesn't.
 
-  | Animation | Looks like | Default for |
-  | --- | --- | --- |
-  | `hex-stream` | two rows of drifting hex, a magenta glitch column sweeping across | cyberpunk-netrunner |
-  | `ice-breach` | a daemon `◢▶` rides a data line, dissolving the ICE wall ahead (`█▓▒░`) | |
-  | `glitch` | the theme's verbs, each arriving scrambled and resolving: `◢ slic?&$ !<>` → `◢ slicing ICE...` | cyberpunk-fixer |
-  | `tide` | rolling swell, a long wave with a shorter one riding it | nautical |
-  | `pulse` | a bright bar sweeping back and forth along a dotted line | plain |
-  | `stock` | Claude's own spinner | |
-- A band above the prompt lists live workers under the theme's name for them: `▌DAEMONS ▸ api-rate-limit ⟨running⟩ ▸ api-export-scan ⟨BLOCKED⟩`.
-- A dim note lands in the transcript when a runner reports: `⚡ api-rate-limit: done · https://…`. Only you see it; the model doesn't.
-
-The choice is saved as `calm=on|off` (and `calm_animation=` for your pick) in `config/fixer.conf`. Quiet mode is a Claude Code mod (`.claude/mods/fixer-calm`) built on Claude Code's early-access mod API, so it can break when Claude Code updates. A custom theme sets its command with `calm_command:`, its band title with `crew_label:`, its default animation with `calm:`, and the verbs `glitch` cycles through with `calm_words:` (comma-separated).
+It's saved as `lowkey=on|off` in `config/fixer.conf`. Lowkey is a Claude Code mod (`.claude/mods/fixer-lowkey`) built on Claude Code's early-access mod API, so it can break when Claude Code updates.
 
 ## How it works
 
@@ -127,8 +99,8 @@ Nothing is saved without your yes, and rejected proposals aren't suggested again
 
 | Path | What | Committed? |
 | --- | --- | --- |
-| `AGENTS.md`, `bin/`, `templates/`, `themes/`, `.agents/skills/` | the tool | yes |
-| `learned/`, new skills, custom themes | what your Fixer learned | yes, to your fork |
+| `AGENTS.md`, `persona.md`, `bin/`, `templates/`, `.agents/skills/` | the tool | yes |
+| `learned/`, new skills | what your Fixer learned | yes, to your fork |
 | `config/`, `data/`, `state/`, `projects/` | your settings, jobs, memory, clones | no (gitignored) |
 | `~/.fixer/worktrees/` | runner worktrees | outside the repo |
 

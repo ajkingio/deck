@@ -53,13 +53,13 @@ why: <one line>
 
 ## 3. Review with the user
 
-Present proposals one at a time, in the theme's voice: the title, the why, and the exact change. The user accepts, edits, or rejects.
+Present proposals one at a time, in the persona's voice: the title, the why, and the exact change. The user accepts, edits, or rejects.
 
 - **Accept or edit**: apply the change, then mark the proposal `[accepted]`. For tracked targets (`brief-patch`, `skill`), commit right away: `git add <files> && git commit -m "learned: <title>"`. Offer to push to their fork; never push without a yes.
 - **Reject**: mark it `[rejected]` and keep it, so it isn't proposed again.
 - **Later**: leave it `[pending]`.
 
-A new skill should be small: a frontmatter `name` and a `description` that says when to use it, then the steps. Neutral language, no theme words.
+A new skill should be small: a frontmatter `name` and a `description` that says when to use it, then the steps. Neutral language, no persona slang.
 
 ## 4. Finish
 

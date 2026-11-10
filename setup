@@ -83,18 +83,9 @@ if [ -z "$(git config user.name)" ] || [ -z "$(git config user.email)" ]; then
   [ -n "$e" ] && git config --global user.email "$e"
 fi
 
-# ------------------------------------------------------------------- theme
-step "Pick a theme"
-for t in "$FIXER_ROOT"/themes/*.md; do
-  tn=$(basename "$t" .md)
-  printf '  %s%-10s%s %s %s(%s)%s\n' "$C" "$tn" "$X" "$(fm_get "$t" description)" "$D" "launch with: $(fm_get "$t" launcher)" "$X"
-done
-note "Want your own? Pick one now; once you're in, ask the Fixer to make a custom theme (/retheme)."
-themes=$(for t in "$FIXER_ROOT"/themes/*.md; do basename "$t" .md; done)
-# shellcheck disable=SC2086
-theme=$(choose "Theme:" "$(cur theme cyberpunk-netrunner)" $themes)
-title=$(theme_get "$theme" client_title)
-client=$(ask "What should the Fixer call you?" "$(cur client_name "${title:-}")")
+# ------------------------------------------------------------------- you
+step "You"
+client=$(ask "What should the Fixer call you?" "$(cur client_name client)")
 
 # ----------------------------------------------------------------- harness
 step "Agents"
@@ -109,14 +100,13 @@ runner_h=$(choose "Which agent should runners use by default?" "$(cur runner_har
 mode=$(choose "Default delivery for new projects: pr (open a PR/MR) or local (merge branches locally)?" "$(cur default_mode pr)" pr local)
 
 mkdir -p "$(dirname "$FIXER_CONF")"
-conf_set "$FIXER_CONF" theme "$theme"
 conf_set "$FIXER_CONF" client_name "$client"
 conf_set "$FIXER_CONF" fixer_harness "$fixer_h"
 conf_set "$FIXER_CONF" runner_harness "$runner_h"
 conf_set "$FIXER_CONF" default_mode "$mode"
 conf_set "$FIXER_CONF" claude_permission_mode "$(cur claude_permission_mode auto)"
 conf_set "$FIXER_CONF" notify "$(cur notify on)"
-conf_set "$FIXER_CONF" calm "$(cur calm on)"
+conf_set "$FIXER_CONF" lowkey "$(cur lowkey on)"
 conf_set "$FIXER_CONF" herdr_session "$(cur herdr_session fixer)"
 [ -n "$(cur onboarded)" ] || conf_set "$FIXER_CONF" onboarded no
 ok "saved config/fixer.conf"
@@ -207,8 +197,8 @@ done
 
 # ---------------------------------------------------------------- launcher
 step "Launcher"
-alias_name=$(theme_get "$theme" launcher); alias_name=${alias_name:-fixer}
-greeting=$(theme_get "$theme" greeting)
+alias_name=$FIXER_ALIAS
+greeting=$FIXER_GREETING
 note "'$alias_name' opens the Herdr session '$(cur herdr_session fixer)' in this folder and starts $fixer_h with \"$greeting\"."
 note "If that session already exists, it asks whether to open it or start a new one."
 installed=0

@@ -40,7 +40,7 @@ if [ -n "$rh" ]; then
   if command -v "$rh" >/dev/null 2>&1; then ok "runner harness: $rh"; else fl "configured runner harness '$rh' is not installed"; fi
 fi
 
-if [ -f "$FIXER_CONF" ]; then ok "configured (theme $(conf_get "$FIXER_CONF" theme ?))"; else wn "not configured yet: onboarding will run"; fi
+if [ -f "$FIXER_CONF" ]; then ok "configured"; else wn "not configured yet: onboarding will run"; fi
 
 # Forge CLIs for registered projects.
 if [ -d "$FIXER_PROJECTS" ]; then

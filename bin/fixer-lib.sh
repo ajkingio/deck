@@ -12,6 +12,8 @@ FIXER_CONF="$FIXER_ROOT/config/fixer.conf"
 FIXER_JOBS="$FIXER_DATA/jobs"
 FIXER_PROJECTS="$FIXER_DATA/projects"
 FIXER_HARNESSES="claude codex grok"
+FIXER_ALIAS=holocall                 # the launcher alias ./setup installs
+FIXER_GREETING="got a job for you"   # what the launcher says to open each session
 
 die() { printf 'fixer: %s\n' "$*" >&2; exit 1; }
 warn() { printf 'fixer: %s\n' "$*" >&2; }
@@ -106,11 +108,6 @@ harness_trusts() { # <harness> <path>
   esac
 }
 
-# Theme frontmatter value, e.g. theme_get cyberpunk-netrunner launcher
-theme_get() { # <theme> <key>
-  local f="$FIXER_ROOT/themes/$1.md"
-  [ -f "$f" ] && fm_get "$f" "$2"
-}
 
 default_harness() {
   local h
