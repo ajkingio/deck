@@ -44,7 +44,7 @@ Then just ask:
 > merge it, and yes
 ```
 
-Each merc shows up as its own Herdr workspace named after its job, so you can watch any of them or step in.
+Each merc shows up as its own Herdr workspace, labelled `└ <job>` and grouped right under the Fixer's, so you can watch any of them or step in.
 
 ## Commands
 

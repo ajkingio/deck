@@ -91,6 +91,40 @@ fixer_harness() {
   printf '%s\n' "$h"
 }
 
+# Herdr workspaces -------------------------------------------------------------
+
+# Runner workspaces are labelled "└ <job-id>" and grouped in a block right
+# after the Fixer's workspace, so they read as its children. Herdr has no
+# nested workspaces; this is presentation only. The Herdr agent name stays
+# the bare job id.
+FIXER_WS_PREFIX="└ "
+runner_ws_label() { printf '%s%s\n' "$FIXER_WS_PREFIX" "$1"; }
+
+# Best-effort: move workspace <ws> to the end of the block of "└ " workspaces
+# that follows the Fixer's own workspace. The Fixer's workspace is resolved
+# live from HERDR_PANE_ID (labels aren't unique). Never fails the caller.
+group_runner_workspace() { # <ws>
+  local new=$1 parent list idx out
+  if [ -z "${HERDR_PANE_ID:-}" ]; then
+    warn "not inside a Herdr pane; leaving workspace $new where Herdr put it"; return 0
+  fi
+  parent=$(herdr pane get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.pane.workspace_id // empty' 2>/dev/null)
+  [ -n "$parent" ] || { warn "could not find the Fixer's Herdr workspace; leaving workspace $new where Herdr put it"; return 0; }
+  [ "$parent" != "$new" ] || return 0
+  list=$(herdr workspace list 2>/dev/null)
+  # Index among the other workspaces: just past the parent and any "└ " run after it.
+  idx=$(printf '%s' "$list" | jq -r --arg p "$parent" --arg n "$new" --arg pre "$FIXER_WS_PREFIX" '
+    [.result.workspaces[] | select(.workspace_id != $n)] as $ws
+    | ($ws | map(.workspace_id) | index($p)) as $i
+    | if $i == null then empty else
+        ([range($i + 1; $ws | length)] | map(select(($ws[.].label // "") | startswith($pre) | not)) | .[0]) // ($ws | length)
+      end' 2>/dev/null)
+  [ -n "$idx" ] || { warn "could not read Herdr's workspace order; leaving workspace $new where Herdr put it"; return 0; }
+  out=$("$FIXER_BIN/fixer-herdr-move" "$new" "$idx" 2>&1 >/dev/null) ||
+    warn "could not move workspace $new next to the Fixer's: $out"
+  return 0
+}
+
 # Read-only: does <harness> already trust the repository at <path>?
 harness_trusts() { # <harness> <path>
   local h=$1 p=$2 f

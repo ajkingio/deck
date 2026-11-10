@@ -64,6 +64,7 @@ bin/
   fixer-forge          gh/glab adapter (see Forges); refuses `open` from a runner
   fixer-open           push + open the PR/MR, only on the client's word
   fixer-teardown       close workspace + remove worktree, refuses on unlanded work
+  fixer-herdr-move     send Herdr's API-only workspace.move (used by fixer-spawn)
 # gitignored, private to the client:
 config/                client-name, harnesses, delivery default, lowkey
 data/                  jobs.md, projects.md, profile.md, engrams/, proposals.md, reports/<id>.md
@@ -77,10 +78,12 @@ state/                 <job-id>.status append-only event lines
 2. **Brief.** Fixer fills a template with the client's intent, scope limits, delivery mode, and the engrams tagged for that project (this is how learning reaches runners, which load the project's instructions, not fixer's).
 3. **Spawn.** `fixer-spawn`:
    `git worktree add -b fixer/<id> ~/.fixer/worktrees/<home>/<id>` →
-   `herdr workspace create --cwd <worktree> --label <id> --env FIXER_JOB=<id> ...` →
+   `herdr workspace create --cwd <worktree> --label "└ <id>" --env FIXER_JOB=<id> ...` →
+   `fixer-herdr-move <ws> <index>` (best-effort) →
    `herdr agent start <id> --kind <harness> --pane <root-pane> -- <autonomy flags>` →
    `herdr agent prompt <id> "read your brief at ..."`.
    We don't use `herdr worktree create`: it also opens a workspace for the main repo when none exists, which teardown would then have to account for. With plain git plus `workspace create`, each job owns exactly one workspace.
+   Herdr has no nested workspaces, so runner workspaces are grouped visually instead: each is labelled `└ <id>` and moved to the end of the block of `└ ` workspaces right after the Fixer's own, newest last. The Fixer's workspace is resolved live from `HERDR_PANE_ID` (`herdr pane get`), never by its label, since labels aren't unique. `workspace.move` has no CLI, so `bin/fixer-herdr-move` sends that one request over `HERDR_SOCKET_PATH`. A failed move only warns. The Herdr agent name stays the bare `<id>`, so every `herdr agent …` call is unaffected; teardown accepts both `└ <id>` and the older plain `<id>` label.
    Worktrees live outside the fixer repo because Claude Code loads `CLAUDE.md` from parent directories, so a worktree inside fixer would make the runner act as a Fixer.
 4. **Report.** The runner appends one line to `state/<id>.status`: `done <url|sha>`, `blocked <question>`, or `failed <reason>`. Recon also writes `data/reports/<id>.md`. Herdr's own `blocked` state catches approval dialogs the runner can't report itself.
 5. **Relay.** Fixer tells the client the outcome or decision, optionally with `herdr notification show`.

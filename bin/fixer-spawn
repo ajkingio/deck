@@ -6,7 +6,9 @@
 #
 # Steps: git worktree add (branch fixer/<id>) -> herdr workspace create ->
 # herdr agent start --kind <harness> -> herdr agent prompt "read your brief".
-# Each job owns exactly one Herdr workspace, labelled with the job id.
+# Each job owns exactly one Herdr workspace, labelled "└ <id>" and moved into
+# the block right after the Fixer's workspace (best-effort). The Herdr agent
+# name is the bare job id.
 . "$(dirname "$0")/fixer-lib.sh"
 
 id=${1:-}; shift || true
@@ -48,13 +50,14 @@ if [ $resume = 0 ]; then
   job_set "$id" worktree "$wt"
   job_set "$id" base_sha "$(git -C "$wt" rev-parse HEAD)"
 
-  out=$(herdr workspace create --cwd "$wt" --label "$id" --no-focus \
+  out=$(herdr workspace create --cwd "$wt" --label "$(runner_ws_label "$id")" --no-focus \
     --env "FIXER_JOB=$id" --env "FIXER_HOME=$FIXER_ROOT" --env "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false" 2>&1) \
     || die "herdr workspace create failed: $out (worktree left at $wt)"
   ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id')
   pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id')
   job_set "$id" workspace "$ws"
   job_set "$id" pane "$pane"
+  group_runner_workspace "$ws"
   job_set "$id" status starting
 else
   [ "$status" = starting ] || die "--resume is only for a job stuck in 'starting' (job $id is $status)"
@@ -86,7 +89,7 @@ if ! herdr agent get "$id" >/dev/null 2>&1; then
     code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
     if [ "$code" = agent_pane_busy ] && [ $tries -lt 30 ]; then tries=$((tries + 1)); sleep 1; continue; fi
     if [ "$code" = agent_not_ready ]; then
-      die "runner $id is stopped at a startup dialog in Herdr workspace $ws ($id). Read it with: herdr pane read $pane --source visible --lines 40. Ask the client to answer it there, then run: bin/fixer-spawn $id --resume"
+      die "runner $id is stopped at a startup dialog in Herdr workspace $ws ($(runner_ws_label "$id")). Read it with: herdr pane read $pane --source visible --lines 40. Ask the client to answer it there, then run: bin/fixer-spawn $id --resume"
     fi
     die "herdr agent start failed: $out. Fix the cause, then retry with: bin/fixer-spawn $id --resume"
   done
