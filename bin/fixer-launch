@@ -66,6 +66,7 @@ shell_idle() { # <pane>: true when only the shell itself is in the foreground
 }
 
 fresh_start() {
+  echo "starting Herdr session '$session' and $harness..."
   mkdir -p "$FIXER_STATE"
   (nohup herdr --session "$session" server >"$FIXER_STATE/herdr-$session.log" 2>&1 &)
   local i=0
@@ -88,12 +89,14 @@ fresh_start() {
       H workspace close "$w" >/dev/null 2>&1 || true
     done
   ) >/dev/null 2>&1 &
-  # Start the Fixer with the greeting as its first prompt. agent start waits for
-  # the new shell's prompt (retry while it is still starting up), so the
-  # command can't be typed into a shell that isn't ready yet.
+  # Start the Fixer with no prompt, then send the greeting from the background
+  # once it's ready, and attach right away. (Passing the greeting as the first
+  # prompt makes agent start wait until the Fixer has finished answering it,
+  # leaving the client staring at a blank terminal.) agent start also waits for
+  # the new shell's prompt (retry while it is still starting up).
   i=0
   while :; do
-    out=$(H agent start fixer --kind "$harness" --pane "$pane" --timeout 60000 -- "$greeting" 2>&1) && break
+    out=$(H agent start fixer --kind "$harness" --pane "$pane" --timeout 60000 2>&1) && break
     code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
     case $code in
       agent_pane_busy)
@@ -112,6 +115,12 @@ fresh_start() {
       *) die "could not start $harness: $out" ;;
     esac
   done
+  # Greet once the Fixer is idle: right away, or after the client answers a
+  # startup dialog (up to 10 minutes).
+  (
+    H agent wait fixer --until idle --timeout 600000 >/dev/null 2>&1 &&
+      H agent prompt fixer "$greeting" >/dev/null 2>&1
+  ) >/dev/null 2>&1 &
 }
 
 if session_exists && [ $force_new = 0 ]; then

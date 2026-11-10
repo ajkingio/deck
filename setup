@@ -211,12 +211,23 @@ alias_name=$(theme_get "$theme" launcher); alias_name=${alias_name:-fixer}
 greeting=$(theme_get "$theme" greeting)
 note "'$alias_name' opens the Herdr session '$(cur herdr_session fixer)' in this folder and starts $fixer_h with \"$greeting\"."
 note "If that session already exists, it asks whether to open it or start a new one."
+installed=0
 if confirm "Add the '$alias_name' alias to your shell config?" Y; then
   "$FIXER_BIN/fixer-launcher" install | sed 's/^/  /'
+  installed=1
 else
   note "skipped; you can always run: $FIXER_BIN/fixer-launch"
 fi
 
 # -------------------------------------------------------------------- done
 step "All set"
-printf '  Open a new terminal and type %s%s%s.\n\n' "$C$B" "$alias_name" "$X"
+if [ $installed = 1 ]; then
+  note "This terminal started before the alias existed, so it doesn't know '$alias_name' yet."
+  if confirm "Start a fresh shell here so '$alias_name' works now?" Y; then
+    printf '  Type %s%s%s.\n\n' "$C$B" "$alias_name" "$X"
+    cd "$FIXER_ROOT" && exec "${SHELL:-/bin/zsh}" -i
+  fi
+  printf '  Open a new terminal (or run: source your shell rc file) and type %s%s%s.\n\n' "$C$B" "$alias_name" "$X"
+else
+  printf '  Run %s%s%s to start.\n\n' "$C$B" "$FIXER_BIN/fixer-launch" "$X"
+fi
