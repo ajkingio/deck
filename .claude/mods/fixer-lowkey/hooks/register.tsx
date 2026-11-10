@@ -26,8 +26,9 @@ const CONF = 'config/fixer.conf'
 const JOBS = 'data/jobs'
 const FRAME_MS = 120
 const POLL_MS = 3000
-const CYAN = '#2bd9ff'
-const MAGENTA = '#ff3ec8'
+const TEAL = '#00f0fa'
+const YELLOW = '#fff405'
+const MAGENTA = '#ff3ec8' // anything waiting on the client
 const AMBER = '#ffb000'
 const GREEN = '#3ddc84'
 
@@ -253,12 +254,12 @@ export const register: Register = on => {
     if (mercs.length === 0) return next(e)
     const { Box, Text } = $.ui.resolve(e)
     const color = (s: string) =>
-      s === 'running' || s === 'starting' ? CYAN : s === 'review' || s === 'reported' ? GREEN : s === 'failed' ? AMBER : MAGENTA
+      s === 'running' || s === 'starting' ? TEAL : s === 'review' || s === 'reported' ? GREEN : s === 'failed' ? AMBER : MAGENTA
     const stateText = (s: string) =>
       s === 'dialog' || s === 'blocked' ? s.toUpperCase() : s === 'review' || s === 'reported' ? 'ready' : s
     return (
       <Box flexDirection="row" flexWrap="wrap">
-        <Text color={MAGENTA} bold>▌MERCS </Text>
+        <Text color={YELLOW} bold>▌MERCS </Text>
         {mercs.map(r => (
           <Text>
             <Text dimColor> ▸ </Text>
