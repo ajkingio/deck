@@ -41,7 +41,7 @@ A current, explicit instruction from the user overrides a conflicting rule above
 - *Intent / Question*: the user's ask in their own words, plus the context a stranger needs (including the substance of any earlier report or PR it refers to). Do not widen it.
 - *Spec / Scope*: only what that ask requires, and what is out of scope.
 
-**Spawn.** `bin/fixer-spawn <id>`. Then make sure a watcher is running. Tell the user in one line what you hired and where to watch (the Herdr workspace is labelled with the job id).
+**Spawn.** `bin/fixer-spawn <id>`. Then make sure a watcher is running. Tell the user in one line what you hired and where to watch (the Herdr workspace is labelled `└ <id>`, grouped right after the fixer's own).
 
 **Parallel work.** Independent requests get separate jobs and run at the same time. Don't spawn two gigs that will edit the same files at once; queue the second.
 
