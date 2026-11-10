@@ -1,5 +1,5 @@
 // The /lowkey working-row animation: two rows of drifting hex and binary,
-// with a magenta glitch column sweeping across. A pure function of the row
+// with a neon-green glitch column sweeping across. A pure function of the row
 // width and a frame counter (one tick every 120ms while a turn runs), so it
 // can be tested on its own.
 
@@ -7,7 +7,7 @@ export type Seg = { text: string; color: string; bold?: boolean; dim?: boolean }
 export type Row = Seg[]
 
 const CYAN = '#2bd9ff'
-const MAGENTA = '#ff3ec8'
+const NEON_GREEN = '#39ff14'
 const HEX = '0123456789ABCDEF'
 
 function hash(n: number): number {
@@ -33,10 +33,10 @@ export function hexStream(width: number, f: number): Row[] {
     const out: Row = []
     for (let c = 0; c < width; c++) {
       let s: Seg
-      if (c === g) s = { text: '▌', color: MAGENTA, bold: true }
+      if (c === g) s = { text: '▌', color: NEON_GREEN, bold: true }
       else if (c === g + 1) {
         const ch = cell(c, r, f * 3)
-        s = { text: ch === ' ' ? HEX.charAt(hash(f + r) % 16) : ch, color: MAGENTA, bold: true }
+        s = { text: ch === ' ' ? HEX.charAt(hash(f + r) % 16) : ch, color: NEON_GREEN, bold: true }
       } else s = { text: cell(c, r, f), color: CYAN, dim: true }
       const last = out[out.length - 1]
       if (last && last.color === s.color && last.bold === s.bold && last.dim === s.dim) last.text += s.text

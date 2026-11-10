@@ -61,7 +61,7 @@ Codex uses `$sitrep` instead of `/sitrep`.
 With `/lowkey` on (Claude Code), the transcript is just the conversation:
 
 - Tool calls, their results, and the watcher's wake-ups are hidden. ctrl+o still shows everything, and the model's context isn't touched.
-- The "working…" spinner becomes a hex stream: two rows of drifting hex with a magenta glitch column sweeping across.
+- The "working…" spinner becomes a hex stream: two rows of drifting hex with a neon-green glitch column sweeping across.
 - A band above the prompt lists live mercs: `▌MERCS ▸ api-rate-limit ⟨running⟩ ▸ api-export-recon ⟨BLOCKED⟩`.
 - A dim note lands in the transcript when a merc reports: `⚡ api-rate-limit: done · https://…`. Only you see it; the model doesn't.
 
