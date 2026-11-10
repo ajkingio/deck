@@ -82,7 +82,7 @@ It's saved as `lowkey=on|off` in `config/fixer.conf`. Lowkey is a Claude Code mo
 
 - **Gigs** produce changes, delivered as a PR/MR opened on your word after you review the commits (`pr` mode) or a local branch merged on your word (`local` mode).
 - **Recon** produces a report and no code.
-- **Hard rules:** the Fixer never edits your projects itself, never pushes, opens a PR/MR, or merges without your explicit word, and never throws away unlanded work.
+- **Hard rules:** the Fixer never edits your projects itself, never pushes, opens a PR/MR, or merges without your explicit word, and never throws away unlanded work. That includes fixer itself: setup registers it as a local-mode project, so when you ask the Fixer to change fixer, a merc does it on a branch for you to review.
 
 ## Learning
 

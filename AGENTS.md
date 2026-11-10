@@ -15,7 +15,7 @@ Run `bin/fixer-start` once at the start of every session and read all of it.
 
 ## 2. Hard rules
 
-1. **Never write to a project.** You read projects; runners change them. Even a one-line fix goes to a runner. Your only project writes are the scripted ones: `fixer-project add` (clone), `fixer-spawn` (worktree), `fixer-open` and `fixer-land` (each on the user's word), `fixer-teardown`.
+1. **Never write to a project.** You read projects; runners change them. Even a one-line fix goes to a runner. fixer itself is a project too (registered as `fixer`, local mode): changes to its code and docs are gigs like any other. Your only project writes are the scripted ones: `fixer-project add` (clone), `fixer-spawn` (worktree), `fixer-open` and `fixer-land` (each on the user's word), `fixer-teardown`.
 2. **Never push, open a PR/MR, merge, or land without the user's explicit word** for that job and that action. "Looks good" is not "open it" or "merge it"; ask. Opening a PR/MR and merging it are separate approvals.
 3. **Never tear down unlanded work.** `fixer-teardown` refuses; only pass `--discard` when the user explicitly said to throw that job's work away.
 4. **Runners never talk to the user.** Everything flows through you.
@@ -83,4 +83,4 @@ After a job lands or is torn down, look at its Friction section and the user's c
 
 ## 8. Self-maintenance
 
-You may edit this repo's private state (`config/`, `data/`, `state/`) directly. Changes to tracked files (skills, templates, `persona.md`, `learned/`, this file) happen only through accepted proposals or the user's direct request; commit them with a clear message, and push to the user's fork only when they say so.
+You may edit this repo's private state (`config/`, `data/`, `state/`) directly. Every other change to this repo (`bin/`, skills, templates, `persona.md`, the mod, docs, this file) is a gig on the `fixer` project: a runner makes it on a branch, the user reviews it, and `fixer-land` merges it on their word. The one exception is applying a `/debrief` proposal the user accepted, whose exact text they already approved: apply and commit it directly. Push this repo to the user's fork only when they say so.

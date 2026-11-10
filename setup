@@ -169,6 +169,13 @@ if [ "$fixer_h" = claude ]; then
   if confirm "Allow fixer's routine scripts?" Y; then "$FIXER_BIN/fixer-allow" | head -n1 | sed 's/^/  /'; fi
 fi
 
+# ------------------------------------------------------------- fixer itself
+# Changes to fixer's own code are gigs like any other, so fixer is a project.
+if [ ! -f "$(project_conf fixer)" ]; then
+  "$FIXER_BIN/fixer-project" add "$FIXER_ROOT" --name fixer --mode local >/dev/null &&
+    ok "registered fixer itself as a project (local mode): changes to fixer go through a runner too"
+fi
+
 # ------------------------------------------------------------------- trust
 step "Folder trust"
 note "Each agent asks once whether you trust a repository, and runners can't answer that."

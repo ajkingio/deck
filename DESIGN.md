@@ -159,6 +159,8 @@ Gotchas baked into the adapter:
 
 ## Decisions
 
+- fixer is a project of itself (`fixer`, local mode, registered by `./setup`). Changes to its tracked files are gigs, so the Fixer never does work directly, not even on its own code or contract; only private state and the exact text of accepted `/debrief` proposals are written directly. Local-mode spawns branch from the local base, not `origin/<base>`, because landing merges back into the local checkout.
+
 - Learned skills and brief patches are committed to the client's fork. Upstream never edits `learned/`. Profile and engrams stay private in `data/`.
 
 ## Setup and launch

@@ -45,6 +45,13 @@ if [ -d "$FIXER_DATA/engrams" ]; then
 fi
 [ $n = 0 ] && echo "(none)"
 
+if [ ! -f "$(project_conf fixer)" ]; then
+  echo
+  echo "## NOTE"
+  echo "fixer itself isn't registered as a project yet. Register it before changing fixer's code:"
+  echo "  bin/fixer-project add $FIXER_ROOT --name fixer --mode local"
+fi
+
 echo
 echo "## Projects"
 "$FIXER_BIN/fixer-project" list

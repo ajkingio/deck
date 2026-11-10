@@ -36,8 +36,10 @@ if [ $resume = 0 ]; then
   [ -d "$ppath" ] || die "project path missing: $ppath"
   [ -e "$wt" ] && die "worktree path already exists: $wt"
 
+  # pr mode branches from the forge's latest base; local mode from the local
+  # checkout's base, which is where fixer-land merges it back.
   baseref=$base
-  if git -C "$ppath" remote get-url origin >/dev/null 2>&1; then
+  if [ "$(job_get "$id" mode)" = pr ] && git -C "$ppath" remote get-url origin >/dev/null 2>&1; then
     if git -C "$ppath" fetch --quiet origin "$base" 2>/dev/null; then baseref="origin/$base"; fi
   fi
   mkdir -p "$(dirname "$wt")"
