@@ -6,7 +6,7 @@
 export type Seg = { text: string; color: string; bold?: boolean; dim?: boolean }
 export type Row = Seg[]
 
-const CYAN = '#2bd9ff'
+const CYAN_DIM = '#1597b3' // darker cyan, set directly: many terminals draw the dim attribute as gray
 const NEON_GREEN = '#39ff14'
 const HEX = '0123456789ABCDEF'
 
@@ -37,7 +37,7 @@ export function hexStream(width: number, f: number): Row[] {
       else if (c === g + 1) {
         const ch = cell(c, r, f * 3)
         s = { text: ch === ' ' ? HEX.charAt(hash(f + r) % 16) : ch, color: NEON_GREEN, bold: true }
-      } else s = { text: cell(c, r, f), color: CYAN, dim: true }
+      } else s = { text: cell(c, r, f), color: CYAN_DIM }
       const last = out[out.length - 1]
       if (last && last.color === s.color && last.bold === s.bold && last.dim === s.dim) last.text += s.text
       else out.push(s)
