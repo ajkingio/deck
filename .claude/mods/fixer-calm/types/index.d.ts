@@ -17,6 +17,10 @@ declare module 'claude-code' {
       sprite: string
       /** Animation frame counter; advances while a turn runs with calm on. */
       frame: number
+      /** The crew band's title, from the theme's `crew_label` (DAEMONS, MERCS, CREW). */
+      label: string
+      /** The theme's name for the toggle command (`ghost`, `lowkey`, `calm`, `focus`). */
+      command: string
       /** Live runners for the crew band. */
       crew: Shaped<CrewEntry[]>
     }

@@ -9,7 +9,7 @@ Status: draft. Decisions below are agreed unless marked **open**.
 
 - **Clone and go.** No install step. `git clone`, start `herdr`, start your agent inside it, answer a few onboarding questions.
 - **Lightweight.** The always-loaded contract (`AGENTS.md`) stays under ~1,500 words. Mechanics live in a handful of small scripts.
-- **Themeable.** Cyberpunk netrunner by default; the user picks a theme on first run.
+- **Themeable.** cyberpunk-netrunner by default; the user picks a theme in `./setup`.
 - **Learns, with consent.** fixer proposes what to remember and which skills to create; nothing is written without the user's approval.
 
 ## Non-goals (things firstmate has that fixer deliberately drops)
@@ -18,15 +18,20 @@ Session backends other than Herdr, harnesses beyond the three below, secondmates
 
 ## Roles
 
-| Neutral term (used in AGENTS.md and scripts) | Netrunner theme |
-| --- | --- |
-| operator — the main agent | **Fixer** |
-| user | **client** |
-| worker | runner |
-| ship task | gig |
-| scout task | recon |
-| backlog | job board |
-| memory entry | engram |
+| Neutral term (AGENTS.md, scripts) | cyberpunk-netrunner (default) | cyberpunk-fixer |
+| --- | --- | --- |
+| operator, the main agent | **the deck** (the cyberdeck's AI) | **the Fixer** |
+| user | **netrunner** | **client** |
+| worker | daemon | merc |
+| ship task | run | gig |
+| scout task | scan | recon |
+| worktree | subnet | safehouse |
+| backlog | queue | job board |
+| memory entry | shard | engram |
+| hard rules | ICE | — |
+| launcher / greeting | `jackin` / "jack in" | `holocall` / "got a job for you" |
+
+The split came from the launcher: a client doesn't jack in, a netrunner does. So the netrunner theme makes the user the netrunner and the agent their deck, and the original broker persona became its own theme, where the client reaches their Fixer by holocall.
 
 ## Hard rules
 
@@ -50,7 +55,7 @@ Session backends other than Herdr, harnesses beyond the three below, secondmates
 AGENTS.md              the contract (theme-neutral)
 CLAUDE.md              @AGENTS.md   (Codex and Grok read AGENTS.md natively)
 DESIGN.md              this file
-themes/                netrunner.md, nautical.md, plain.md, <custom>.md
+themes/                cyberpunk-netrunner.md, cyberpunk-fixer.md, nautical.md, plain.md, <custom>.md
 .agents/skills/        shared skills; .claude/skills -> ../.agents/skills
 templates/             gig-brief.md, recon-brief.md
 bin/
@@ -167,7 +172,7 @@ Onboarding (runs automatically when `config/` is absent): pick a theme (or descr
 ## Setup and launch
 
 - **`./setup`** (run once after cloning, outside the agent): dependencies, theme, client name, Fixer and runner harness, delivery default, Herdr agent hooks (`herdr integration install`), gh/glab logins, `upstream` remote (guessed from the fork's parent via gh), `fixer-allow`, folder trust for the fixer repo and any projects (`fixer-trust` in foreground mode), then the launcher alias. Re-runnable; current values are the defaults. Writes `onboarded=no` so the first session runs the in-chat welcome.
-- **Theme frontmatter** carries `launcher` (alias name), `greeting` (the opening line) and `client_title`. netrunner: `jackin` / "jack in"; nautical: `ahoy` / "ahoy"; plain: `fixer` / "start".
+- **Theme frontmatter** carries `launcher` (alias name), `greeting` (the opening line), `client_title`, `crew_label` (the calm band's title) and `calm` (the spinner animation). cyberpunk-netrunner: `jackin` / "jack in" / DAEMONS; cyberpunk-fixer: `holocall` / "got a job for you" / MERCS; nautical: `ahoy` / "ahoy" / CREW; plain: `fixer` / "start" / WORKERS.
 - **`bin/fixer-launcher install|remove|show`** writes the alias to `~/.zshrc`, `~/.bashrc`, or a fish `conf.d` file, fenced by markers naming this clone's path. `/retheme` reruns `install`, so the alias follows the theme.
 - **`bin/fixer-launch`** (what the alias runs): if the Herdr session `fixer` (config `herdr_session`) exists, ask open / new / cancel. New replaces it: live runners are listed and must be confirmed by typing `replace`, since stopping the session ends their panes (worktrees and job records survive). A fresh start runs a headless `herdr --session fixer server`, creates one `fixer` workspace at the repo, closes the server's default workspace, runs `<harness> "<greeting>"` in it, and attaches. A second session alongside was rejected: two Fixers on one job board would both supervise and land.
 - The Fixer is started with `herdr agent start fixer --kind <harness> -- "<greeting>"`, not `pane run`: a command typed into a shell that is still running its startup files gets lost. The server's default workspace is closed only once its shell is idle, because killing a shell mid-startup can leave pyenv's rehash lock behind and stall every later shell. Verified 2026-11-10: fresh start in 5.5s, one `fixer` workspace, `claude 'jack in'` running.
@@ -180,10 +185,10 @@ A mod at `.claude/mods/fixer-calm`, auto-loaded through `.agents/skills/fixer-ca
 | --- | --- |
 | `ui.render` ToolUse / ToolResult / ToolGroup | drawn as nothing (passes through when `isExpanded`, i.e. ctrl+o) |
 | `ui.render` UserMessage | the watcher's task-notification row (its description starts `fixer-wait:`) drawn as nothing |
-| `ui.render` Spinner | the theme's animation (`calm:` in theme frontmatter); netrunner = `hex-stream` |
-| `ui.render` AbovePrompt | crew band from `data/jobs/*/job.conf`, refined by `herdr agent list` (a runner at a dialog shows `DIALOG`) |
+| `ui.render` Spinner | the theme's animation (`calm:` in theme frontmatter); both cyberpunk themes = `hex-stream` |
+| `ui.render` AbovePrompt | crew band (titled by the theme's `crew_label`) from `data/jobs/*/job.conf`, refined by `herdr agent list` (a runner at a dialog shows `DIALOG`) |
 | `$.session.append` system notice | one dim note per new `status.log` line; display-only, the model never reads it |
-| `/calm` | toggles `calm=` in `config/fixer.conf`, confirms with a toast |
+| `/calm` + the theme's `calm_command` (`/ghost`, `/lowkey`, `/focus`) | toggles `calm=` in `config/fixer.conf`, confirms with a toast; `command.describe` lists only the current theme's name, and an earlier theme's name stays usable but hidden (commands can't be unregistered) |
 
 Polls job files every 3s; the animation timer runs only during a turn. Seen status-log counts are kept in `$.store` so a restart doesn't replay old events. Assistant narration is not hidden: the API gives no reliable way to tell a mid-turn note from the final reply, and the contract already tells the Fixer not to narrate.
 

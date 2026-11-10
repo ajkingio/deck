@@ -106,7 +106,7 @@ harness_trusts() { # <harness> <path>
   esac
 }
 
-# Theme frontmatter value, e.g. theme_get netrunner launcher
+# Theme frontmatter value, e.g. theme_get cyberpunk-netrunner launcher
 theme_get() { # <theme> <key>
   local f="$FIXER_ROOT/themes/$1.md"
   [ -f "$f" ] && fm_get "$f" "$2"

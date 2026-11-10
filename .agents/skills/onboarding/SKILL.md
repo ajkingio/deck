@@ -20,7 +20,7 @@ Five lines or fewer:
 - Every runner gets its own worktree and its own Herdr workspace you can watch.
 - Nothing merges without your word.
 - `/sitrep` for the full picture, `/debrief` to review what I've learned, `/retheme` to change my voice (your launcher alias changes with it).
-- On Claude Code, `/calm` hides the tool-call clutter and shows the crew in a band above the prompt.
+- On Claude Code, the theme's quiet mode (`/<calm_command>`, printed at session start; `/ghost` for cyberpunk-netrunner) hides the tool-call clutter and shows the crew in a band above the prompt.
 
 ## 3. First project
 

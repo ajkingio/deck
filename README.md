@@ -2,9 +2,9 @@
 
 **Talk to one agent. It hires the crew.**
 
-fixer turns the coding agent you already use into a **Fixer**: the one agent you talk to. You say what you want; it hires runner agents to do the work, each in its own git worktree and its own [Herdr](https://herdr.dev) workspace, supervises them, and comes back with finished PRs, merged branches, or investigation reports. It only interrupts you for real decisions, and nothing merges without your word.
+fixer turns the coding agent you already use into the one agent you talk to: your deck, your Fixer, or your first mate, depending on the theme. You say what you want; it hires runner agents to do the work, each in its own git worktree and its own [Herdr](https://herdr.dev) workspace, supervises them, and comes back with finished PRs, merged branches, or investigation reports. It only interrupts you for real decisions, and nothing merges without your word.
 
-It's a lightweight take on [firstmate](https://github.com/kunchenguid/firstmate): the same idea, cut down to a starting point you can read in an afternoon and make your own. Cyberpunk netrunner by default; pick a different theme on first run.
+It's a lightweight take on [firstmate](https://github.com/kunchenguid/firstmate): the same idea, cut down to a starting point you can read in an afternoon and make your own. It ships with two cyberpunk themes (netrunner by default, and fixer), a nautical one and a plain one, and you can write your own.
 
 There's nothing to install. The repo is the tool: an `AGENTS.md` contract, a few skills, and a handful of small shell scripts.
 
@@ -31,22 +31,29 @@ There's nothing to install. The repo is the tool: an `AGENTS.md` contract, a few
    ```
    That opens a Herdr session named `fixer` in this folder and starts your agent with "jack in". If a `fixer` session already exists, it asks whether to open it or start a new one. Starting a new one replaces the old session, and it asks again first if runners are still live in it.
 
-The alias comes from the theme: `jackin` for netrunner, `ahoy` for nautical, `fixer` for plain. `/retheme` updates it.
+The alias comes from the theme, and `/retheme` updates it:
+
+| Theme | You are | The agent is | Its crew | Launcher |
+| --- | --- | --- | --- | --- |
+| `cyberpunk-netrunner` (default) | the netrunner | your deck | daemons | `jackin` |
+| `cyberpunk-fixer` | the client | your Fixer | mercs | `holocall` |
+| `nautical` | the captain | the first mate | the crew | `ahoy` |
+| `plain` | you | a coordinator | workers | `fixer` |
 
 Then just ask:
 
 ```
 > add rate limiting to the login endpoint in api, and figure out why the nightly export is slow
 
-  Two jobs posted, client. Runner `api-rate-limit` is on the gig; `api-export-recon` is digging into the export.
+  Two daemons uploaded, runner. `api-rate-limit` is on the run; `api-export-scan` is tracing the export.
   ...
-  Preem. PR's up and CI is green: https://github.com/you/api/pull/42 (rate limiting, low risk).
-  Recon's back: the export does one query per row. Want a gig to batch it?
+  Breach complete: PR's up, CI green. https://github.com/you/api/pull/42 (rate limiting, low risk).
+  Scan's back: the export does one query per row. Upload a daemon to batch it?
 
 > merge it, and yes
 ```
 
-Each runner shows up as its own Herdr workspace named after its job, so you can watch any of them or step in.
+Each worker (a daemon, in this theme) shows up as its own Herdr workspace named after its job, so you can watch any of them or step in.
 
 ## Commands
 
@@ -55,20 +62,29 @@ Each runner shows up as its own Herdr workspace named after its job, so you can 
 | `/sitrep` | What needs you, what's running, what's queued, what landed |
 | `/debrief` | Review what the Fixer wants to remember, and approve or reject each item |
 | `/retheme` | Change the theme |
-| `/calm` | Claude Code only: hide tool-call clutter, animate the working row, show the crew |
+| `/ghost` | Quiet mode (Claude Code only): hide tool-call clutter, animate the working row, show the crew. Named by the theme; `/calm` works in every theme |
 
 Codex uses `$sitrep` instead of `/sitrep`.
 
-### Calm mode
+### Quiet mode
 
-`/calm` (Claude Code) turns the Fixer's transcript into just the conversation:
+Quiet mode (Claude Code) turns the transcript into just the conversation. Each theme names its command, and `/calm` works in all of them:
+
+| Theme | Command |
+| --- | --- |
+| cyberpunk-netrunner | `/ghost` |
+| cyberpunk-fixer | `/lowkey` |
+| nautical | `/calm` |
+| plain | `/focus` |
+
+With it on:
 
 - Tool calls, their results, and the watcher's wake-ups are hidden. ctrl+o still shows everything, and the model's context isn't touched.
-- The "working…" spinner becomes the theme's animation. Netrunner's is a hex stream with a glitch column sweeping across it.
-- A band above the prompt lists live runners: `▌RUNNERS ▸ api-rate-limit ⟨running⟩ ▸ api-export-recon ⟨BLOCKED⟩`.
+- The "working…" spinner becomes the theme's animation. Both cyberpunk themes use a hex stream with a glitch column sweeping across it.
+- A band above the prompt lists live workers under the theme's name for them: `▌DAEMONS ▸ api-rate-limit ⟨running⟩ ▸ api-export-scan ⟨BLOCKED⟩`.
 - A dim note lands in the transcript when a runner reports: `⚡ api-rate-limit: done · https://…`. Only you see it; the model doesn't.
 
-The choice is saved as `calm=on|off` in `config/fixer.conf`. Calm is a Claude Code mod (`.claude/mods/fixer-calm`) built on Claude Code's early-access mod API, so it can break when Claude Code updates. A custom theme picks its animation with `calm: hex-stream` in its frontmatter; any other value keeps the stock spinner.
+The choice is saved as `calm=on|off` in `config/fixer.conf`. Quiet mode is a Claude Code mod (`.claude/mods/fixer-calm`) built on Claude Code's early-access mod API, so it can break when Claude Code updates. A custom theme sets its command with `calm_command:`, its band title with `crew_label:`, and its animation with `calm: hex-stream` (anything else keeps the stock spinner).
 
 ## How it works
 

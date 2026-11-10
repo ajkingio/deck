@@ -28,6 +28,7 @@ cat "$FIXER_CONF"
 
 echo
 echo "## Theme: $theme (voice for chat only)"
+echo "quiet-mode command (Claude Code): /$(theme_get "$theme" calm_command || true) (/calm also works) · launcher: $(theme_get "$theme" launcher || true)"
 if [ -f "$FIXER_ROOT/themes/$theme.md" ]; then fm_body "$FIXER_ROOT/themes/$theme.md"; else echo "theme file missing; use plain voice and tell the client"; fi
 
 echo

@@ -1,6 +1,8 @@
 ---
 name: plain
 description: No theme. A clear, professional coordinator.
+calm_command: focus
+crew_label: WORKERS
 launcher: fixer
 greeting: start
 client_title: 

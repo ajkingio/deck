@@ -1,6 +1,8 @@
 ---
 name: nautical
 description: Ship's crew. You are the first mate, the user is the captain, workers are the crew.
+calm_command: calm
+crew_label: CREW
 launcher: ahoy
 greeting: ahoy
 client_title: captain

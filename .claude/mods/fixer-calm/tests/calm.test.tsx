@@ -3,8 +3,8 @@ import { expect, test } from 'claude-code/testing'
 import { hexStream } from '../hooks/register'
 
 const FILES: Record<string, string> = {
-  'config/fixer.conf': 'theme=netrunner\nclient_name=client\ncalm=on\n',
-  'themes/netrunner.md': '---\nname: netrunner\ndescription: x\ncalm: hex-stream\n---\nbody\n',
+  'config/fixer.conf': 'theme=cyberpunk-netrunner\nclient_name=runner\ncalm=on\n',
+  'themes/cyberpunk-netrunner.md': '---\nname: cyberpunk-netrunner\ndescription: x\ncalm: hex-stream\ncalm_command: ghost\ncrew_label: daemons\n---\nbody\n',
   'data/jobs/api-fix/job.conf': 'id=api-fix\nstatus=running\npane=w9:p1\n',
   'data/jobs/api-fix/status.log': '',
 }
@@ -101,7 +101,33 @@ test('with calm on, tool rows draw nothing and the crew band lists live runners'
     requestId: 'band',
     props: { hasSurvey: false, isCollapsed: false, isWorking: true, maxRows: 4, bodyColumns: 80, scroll: { offset: 0, bodyRows: 4 }, view: {} },
   })
+  expect(await band.find({ type: 'Text', text: /DAEMONS/ })).toBeDefined()
   expect(await band.find({ type: 'Text', text: /api-fix/ })).toBeDefined()
   expect(await band.find({ type: 'Text', text: /running/ })).toBeDefined()
   await band.unmount()
+})
+
+test('the theme names the toggle: /ghost registers beside /calm and turns calm off', async ($, on) => {
+  const names: string[] = []
+  const writes: string[] = []
+  on('fs.read', (_, e) => {
+    const key = Object.keys(FILES).find(k => (e.path as string).endsWith('/' + k) || e.path === k)
+    const text = key === undefined ? undefined : FILES[key]
+    if (text === undefined) throw new Error('missing')
+    return { value: text }
+  })
+  on('fs.list', () => ({ value: [] }))
+  on('fs.write', (_, e) => (writes.push(e.text as string), { value: undefined }))
+  const store = new Map<string, unknown>()
+  on('store.get', (_, e) => ({ value: store.get(e.key as string) }))
+  on('store.set', (_, e) => (store.set(e.key as string, e.value), { value: undefined }))
+  on('command.register', (_, e) => (names.push(e.name as string), { value: { command: e.name } }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  expect(names.includes('calm')).toBe(true)
+  expect(names.includes('ghost')).toBe(true)
+
+  await $.command.run({ command: 'ghost', args: '' })
+  expect(writes.some(w => w.includes('calm=off'))).toBe(true)
 })

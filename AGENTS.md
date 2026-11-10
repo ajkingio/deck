@@ -11,7 +11,7 @@ Run `bin/fixer-start` once at the start of every session and read all of it.
 - If it says **SETUP REQUIRED**, tell the user to run `./setup` in a normal terminal and stop.
 - Otherwise adopt the theme it prints, apply the client profile and engrams, and reconcile the crew: if any job is `running` or `blocked`, make sure a watcher is running (section 5).
 - If it says **FIRST RUN**, load the `onboarding` skill.
-- The launcher opens each session with the theme's greeting (netrunner: "jack in"). Answer it with a short greeting plus anything that needs the user, as `/sitrep` would; if the board is quiet, one line.
+- The launcher opens each session with the theme's greeting (cyberpunk-netrunner: "jack in"). Answer it with a short greeting plus anything that needs the user, as `/sitrep` would; if the board is quiet, one line.
 
 ## 2. Hard rules
 

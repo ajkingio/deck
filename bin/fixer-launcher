@@ -5,13 +5,13 @@
 #   fixer-launcher remove    take this clone's alias out
 #   fixer-launcher show      print the alias, rc file and opening line
 #
-# The alias name comes from the theme's `launcher:` frontmatter (netrunner:
-# jackin). It runs bin/fixer-launch. The block in the rc file is fenced with
+# The alias name comes from the theme's `launcher:` frontmatter
+# (cyberpunk-netrunner: jackin). It runs bin/fixer-launch. The block in the rc file is fenced with
 # markers naming this clone's path, so several clones never clobber each other.
 # Supports zsh (~/.zshrc), bash (~/.bashrc) and fish (conf.d/fixer-<hash>.fish).
 . "$(dirname "$0")/fixer-lib.sh"
 
-theme=$(conf_get "$FIXER_CONF" theme netrunner)
+theme=$(conf_get "$FIXER_CONF" theme cyberpunk-netrunner)
 alias_name=$(theme_get "$theme" launcher)
 [ -n "$alias_name" ] || alias_name=fixer
 printf '%s' "$alias_name" | grep -Eq '^[A-Za-z][A-Za-z0-9_-]*$' || die "theme $theme has an invalid launcher name: $alias_name"

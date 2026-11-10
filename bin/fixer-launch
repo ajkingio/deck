@@ -7,7 +7,7 @@
 #
 # Fresh start: a headless Herdr server for the session (default name: fixer),
 # one workspace at this repo, the Fixer's harness started there with the
-# theme's opening line (netrunner: claude "jack in"), then attach.
+# theme's opening line (cyberpunk-netrunner: claude "jack in"), then attach.
 # If the session already exists: asks to open it or start a new one. A new one
 # replaces the old: stopping it ends every pane in it, so live runners are
 # listed and must be confirmed. Worktrees and job records on disk are kept.
@@ -18,7 +18,7 @@ need herdr; need jq
 
 session=$(conf_get "$FIXER_CONF" herdr_session fixer)
 harness=$(conf_get "$FIXER_CONF" fixer_harness claude)
-theme=$(conf_get "$FIXER_CONF" theme netrunner)
+theme=$(conf_get "$FIXER_CONF" theme cyberpunk-netrunner)
 greeting=$(theme_get "$theme" greeting)
 [ -n "$greeting" ] || greeting=start
 command -v "$harness" >/dev/null 2>&1 || die "$harness is not installed"

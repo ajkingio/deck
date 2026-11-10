@@ -92,7 +92,7 @@ done
 note "Want your own? Pick one now; once you're in, ask the Fixer to make a custom theme (/retheme)."
 themes=$(for t in "$FIXER_ROOT"/themes/*.md; do basename "$t" .md; done)
 # shellcheck disable=SC2086
-theme=$(choose "Theme:" "$(cur theme netrunner)" $themes)
+theme=$(choose "Theme:" "$(cur theme cyberpunk-netrunner)" $themes)
 title=$(theme_get "$theme" client_title)
 client=$(ask "What should the Fixer call you?" "$(cur client_name "${title:-}")")
 

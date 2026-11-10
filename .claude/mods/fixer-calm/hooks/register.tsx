@@ -22,6 +22,14 @@ const calm = atom({ plugin: 'fixer-calm', key: 'calm' } as const, false)
 const sprite = atom({ plugin: 'fixer-calm', key: 'sprite' } as const, 'none')
 const frame = atom({ plugin: 'fixer-calm', key: 'frame' } as const, 0)
 const crew = atom({ plugin: 'fixer-calm', key: 'crew' } as const, [] as CrewEntry[], { shape: 'crew-1' })
+const label = atom({ plugin: 'fixer-calm', key: 'label' } as const, 'CREW')
+const command = atom({ plugin: 'fixer-calm', key: 'command' } as const, 'calm')
+
+// The toggle is /calm in every theme, plus the theme's own name for it
+// (`calm_command:` in its frontmatter: ghost, lowkey, focus). Commands can't be
+// unregistered, so a name from an earlier theme stays usable but is hidden.
+const registered = new Set<string>()
+const DESCRIPTION = 'Quiet mode: hide tool-call clutter, show the crew band and worker notes'
 
 const CONF = 'config/fixer.conf'
 const JOBS = 'data/jobs'
@@ -103,11 +111,37 @@ async function readText($: $, path: string): Promise<string | undefined> {
   }
 }
 
-async function themeSprite($: $, theme: string | undefined): Promise<string> {
-  if (!theme) return 'none'
+async function themeField($: $, theme: string | undefined, key: string): Promise<string | undefined> {
+  if (!theme) return undefined
   const text = await readText($, `themes/${theme}.md`)
-  const m = text?.match(/^---\n[\s\S]*?^calm:\s*(\S+)\s*$[\s\S]*?^---$/m)
-  return m?.[1] ?? 'none'
+  const head = text?.match(/^---\n([\s\S]*?)\n---/)?.[1] ?? ''
+  for (const line of head.split('\n')) {
+    const i = line.indexOf(':')
+    if (i > 0 && line.slice(0, i).trim() === key) return line.slice(i + 1).trim() || undefined
+  }
+  return undefined
+}
+
+async function ensureCommand($: $, name: string): Promise<void> {
+  if (registered.has(name) || !/^[a-z][a-z0-9-]{0,31}$/.test(name)) return
+  await $.command.register({ name, description: DESCRIPTION })
+  registered.add(name)
+}
+
+/** Reads the active theme's animation, crew-band label and command name into state. */
+async function loadTheme($: $): Promise<void> {
+  const conf = parseConf((await readText($, CONF)) ?? '')
+  const spriteName = (await themeField($, conf.theme, 'calm')) ?? 'none'
+  const labelText = ((await themeField($, conf.theme, 'crew_label')) ?? 'CREW').toUpperCase()
+  const name = (await themeField($, conf.theme, 'calm_command')) ?? 'calm'
+  if ((await read($, sprite)) !== spriteName) await update($, sprite, () => spriteName)
+  if ((await read($, label)) !== labelText) await update($, label, () => labelText)
+  await ensureCommand($, 'calm')
+  await ensureCommand($, name)
+  if ((await read($, command)) !== name) {
+    await update($, command, () => name)
+    $.ui.invalidate('command.describe')
+  }
 }
 
 async function writeCalm($: $, on: boolean): Promise<boolean> {
@@ -181,6 +215,7 @@ const GLYPH: Record<string, string> = {
 }
 
 async function poll($: $): Promise<void> {
+  await loadTheme($) // picks up a /retheme without a restart
   const { live, notes, panes } = await scanJobs($)
   const isCalm = await read($, calm)
   if (isCalm) {
@@ -220,32 +255,35 @@ export const register: Register = on => {
     configured = true
     const conf = parseConf(text)
     await update($, calm, () => conf.calm === 'on')
-    const spriteName = await themeSprite($, conf.theme)
-    await update($, sprite, () => spriteName)
-    await $.command.register({
-      name: 'calm',
-      description: 'Toggle calm mode: hide tool-call clutter, show the crew band and runner notes',
-    })
+    await loadTheme($) // also registers /calm and the theme's name for it
     poller?.cancel()
     await poll($) // seeds what has been seen, so old events don't replay
     poller = $.clock.every(POLL_MS, () => void poll($).catch(() => undefined))
     return result
   })
 
-  on('command.run', { command: 'calm' }, async $ => {
+  on('command.run', async ($, e, next) => {
+    if (!registered.has(e.command)) return next(e)
     if (!configured) return { text: 'fixer is not set up in this folder yet.' }
+    await loadTheme($)
+    const name = await read($, command)
+    const title = name.charAt(0).toUpperCase() + name.slice(1)
     const now = !(await read($, calm))
     if (!(await writeCalm($, now))) {
-      $.ui.toast('Calm unchanged: could not write config/fixer.conf')
+      $.ui.toast(`${title} unchanged: could not write config/fixer.conf`)
       return {}
     }
     await update($, calm, () => now)
     if (!now) stopAnimation()
-    const conf = parseConf((await readText($, CONF)) ?? '')
-    const spriteName = await themeSprite($, conf.theme)
-    await update($, sprite, () => spriteName)
-    $.ui.toast(now ? 'Calm on' : 'Calm off')
+    $.ui.toast(`${title} ${now ? 'on' : 'off'}`)
     return {}
+  })
+
+  // List only the current theme's name in the menu; the others still work if typed.
+  on('command.describe', async ($, e, next) => {
+    if (!registered.has(e.command)) return next(e)
+    const shown = await next(e)
+    return { ...shown, isHidden: e.command !== (await read($, command)) }
   })
 
   // The animation runs only while a turn does.
@@ -308,19 +346,20 @@ export const register: Register = on => {
     if (!configured || !(await read($, calm))) return next(e)
     const runners = await read($, crew)
     if (runners.length === 0) return next(e)
+    const title = await read($, label)
     const { Box, Text } = $.ui.resolve(e)
     const color = (s: string) =>
       s === 'running' || s === 'starting' ? CYAN : s === 'review' || s === 'reported' ? GREEN : s === 'failed' ? AMBER : MAGENTA
-    const label = (s: string) =>
+    const stateText = (s: string) =>
       s === 'dialog' || s === 'blocked' ? s.toUpperCase() : s === 'review' || s === 'reported' ? 'ready' : s
     return (
       <Box flexDirection="row" flexWrap="wrap">
-        <Text color={MAGENTA} bold>▌RUNNERS </Text>
+        <Text color={MAGENTA} bold>▌{title} </Text>
         {runners.map(r => (
           <Text>
             <Text dimColor> ▸ </Text>
             <Text>{r.id} </Text>
-            <Text color={color(r.state)}>⟨{label(r.state)}⟩</Text>
+            <Text color={color(r.state)}>⟨{stateText(r.state)}⟩</Text>
           </Text>
         ))}
       </Box>
