@@ -99,7 +99,9 @@ client=$(ask "What should the Fixer call you?" "$(cur client_name "${title:-}")"
 # ----------------------------------------------------------------- harness
 step "Agents"
 first=${harnesses%% *}
-default_fh=$(cur fixer_harness "$( case " $harnesses " in *" claude "*) echo claude ;; *) echo "$first" ;; esac )")
+# (No `case` inside $( ): macOS's bash 3.2 misparses the `)` of its patterns.)
+if [ "${harnesses#*claude}" != "$harnesses" ]; then fallback_fh=claude; else fallback_fh=$first; fi
+default_fh=$(cur fixer_harness "$fallback_fh")
 # shellcheck disable=SC2086
 fixer_h=$(choose "Which agent is the Fixer (the one you talk to)?" "$default_fh" $harnesses)
 # shellcheck disable=SC2086
@@ -159,8 +161,14 @@ else
     guess=$(cd "$FIXER_ROOT" && gh repo view --json parent -q '.parent | select(. != null) | "https://github.com/\(.owner.login)/\(.name)"' 2>/dev/null || true)
   fi
   note "Your fork is 'origin'. Adding the original repo as 'upstream' lets you pull fixer updates."
-  url=$(ask "Upstream repo URL (blank to skip):" "$guess")
-  if [ -n "$url" ]; then git -C "$FIXER_ROOT" remote add upstream "$url" && ok "added upstream: $url"; else note "skipped"; fi
+  while :; do
+    url=$(ask "Upstream repo URL (blank to skip):" "$guess")
+    case $url in
+      "") note "skipped"; break ;;
+      *://*|*@*:*|/*|./*|../*) git -C "$FIXER_ROOT" remote add upstream "$url" && ok "added upstream: $url"; break ;;
+      *) printf '  %sthat doesn'"'"'t look like a git URL (e.g. https://github.com/<owner>/fixer)%s\n' "$Y" "$X" >/dev/tty ;;
+    esac
+  done
 fi
 
 # ------------------------------------------------------------ fewer prompts
