@@ -65,6 +65,10 @@ detect)
   ;;
 
 open)
+  # Runners have FIXER_JOB set. Opening a PR/MR is the client's call, made via fixer-open.
+  if [ -n "${FIXER_JOB:-}" ] && [ "${FIXER_OPEN_APPROVED:-}" != 1 ]; then
+    die "runners do not push or open PRs/MRs; commit, write pr-title.txt and pr-body.md, and report done"
+  fi
   require_forge
   title="" body="" base=""
   while [ $# -gt 0 ]; do

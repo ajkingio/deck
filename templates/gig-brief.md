@@ -10,7 +10,7 @@ You are a runner hired by fixer for one job on project `{{PROJECT}}`. This brief
   - `{{BIN}}/fixer-report {{ID}} done "<result>"` when finished.
   - `{{BIN}}/fixer-report {{ID}} failed "<reason>"` when you cannot finish.
 - Do what the Intent asks, nothing more. Put anything else you notice under Follow-ups in your report.
-- Never merge, force-push, rewrite published history, delete branches, or touch any other repository or worktree.
+- Never push, open a PR/MR, merge, rewrite published history, delete branches, or touch any other repository or worktree. The client reviews your commits first; fixer pushes and opens the PR/MR on their word.
 - Follow the project's own conventions (its AGENTS.md, CLAUDE.md, CONTRIBUTING, existing style). Don't add to those files; fix them only if they are wrong.
 - Before reporting `done` or `failed`, write `{{JOBDIR}}/report.md` with these sections:
   - **Summary**: what you did, in two or three sentences.
@@ -23,10 +23,10 @@ You are a runner hired by fixer for one job on project `{{PROJECT}}`. This brief
 ## Delivery: pull/merge request
 
 1. Make the change. Run the project's tests and linters that cover it.
-2. Commit with clear messages.
-3. Write the PR/MR description to `{{JOBDIR}}/pr-body.md` (what, why, how verified).
-4. Run `{{BIN}}/fixer-forge open --title "<concise title>" --body-file {{JOBDIR}}/pr-body.md`. It pushes the branch and opens the PR/MR on GitHub or GitLab and prints its URL.
-5. Write your report, then `{{BIN}}/fixer-report {{ID}} done "<PR/MR URL>"`.
+2. Commit with clear messages. Do not push. Do not open a PR/MR.
+3. Write the PR/MR title (one line) to `{{JOBDIR}}/pr-title.txt` and the description to `{{JOBDIR}}/pr-body.md` (what, why, how verified). Follow the project's PR/MR template if it has one.
+4. Write your report, then `{{BIN}}/fixer-report {{ID}} done "ready for review $(git rev-parse --short HEAD)"`.
+5. If fixer later asks for changes, commit them (still without pushing), update the PR/MR files if needed, and report `done` again.
 <!-- /DELIVERY -->
 <!-- DELIVERY:local -->
 ## Delivery: local branch

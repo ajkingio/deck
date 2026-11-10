@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# fixer-open: push a finished gig's branch and open its PR/MR. Run ONLY on the
+# client's explicit word for that job. Runners never push or open PRs/MRs.
+#
+#   fixer-open <id>
+#
+# Uses the title in data/jobs/<id>/pr-title.txt and the description in
+# data/jobs/<id>/pr-body.md, both written by the runner.
+# If the PR/MR is already open, pushes the branch's new commits to it instead.
+. "$(dirname "$0")/fixer-lib.sh"
+
+id=${1:-}
+[ -n "$id" ] || { sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+require_job "$id"
+
+[ "$(job_get "$id" kind)" = gig ] || die "only gigs open PRs/MRs"
+[ "$(job_get "$id" mode)" = pr ] || die "job $id is in $(job_get "$id" mode) mode; only pr-mode gigs open PRs/MRs"
+case $(job_get "$id" status) in review) ;; *) die "job $id is $(job_get "$id" status), not review" ;; esac
+
+dir=$(job_dir "$id")
+wt=$(job_get "$id" worktree)
+branch=$(job_get "$id" branch)
+base=$(job_get "$id" base)
+[ -d "$wt" ] || die "worktree $wt is gone"
+[ "$(git -C "$wt" symbolic-ref --quiet --short HEAD || true)" = "$branch" ] || die "worktree $wt is not on $branch"
+[ -z "$(git -C "$wt" status --porcelain)" ] || die "worktree $wt has uncommitted changes; ask the runner to commit or clean up"
+[ "$(git -C "$wt" rev-list --count "$base..$branch" 2>/dev/null || echo 0)" -gt 0 ] || die "$branch has no commits beyond $base"
+
+st=$("$FIXER_BIN/fixer-forge" -C "$wt" status "$branch") || die "could not read PR/MR status"
+state=$(printf '%s' "$st" | jq -r .state)
+case $state in
+open)
+  git -C "$wt" push --quiet origin "$branch" || die "git push failed for $branch"
+  url=$(printf '%s' "$st" | jq -r .url)
+  echo "pushed new commits to $url"
+  ;;
+none)
+  [ -s "$dir/pr-title.txt" ] || die "missing $dir/pr-title.txt"
+  [ -s "$dir/pr-body.md" ] || die "missing $dir/pr-body.md"
+  title=$(head -n1 "$dir/pr-title.txt")
+  url=$(FIXER_JOB="" FIXER_OPEN_APPROVED=1 "$FIXER_BIN/fixer-forge" -C "$wt" open \
+    --title "$title" --body-file "$dir/pr-body.md" --base "$base") || die "could not open PR/MR"
+  url=$(printf '%s\n' "$url" | grep -Eo 'https?://[^ ]+' | tail -n1)
+  echo "opened $url"
+  ;;
+*) die "PR/MR for $branch is $state; not reopening" ;;
+esac
+
+job_set "$id" pr_url "$url"
+job_set "$id" pushed_sha "$(git -C "$wt" rev-parse HEAD)"
+job_set "$id" pr_opened "$(now)"

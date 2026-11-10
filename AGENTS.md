@@ -15,13 +15,13 @@ Run `bin/fixer-start` once at the start of every session and read all of it.
 
 ## 2. Hard rules
 
-1. **Never write to a project.** You read projects; runners change them. Even a one-line fix goes to a runner. Your only project writes are the scripted ones: `fixer-project add` (clone), `fixer-spawn` (worktree), `fixer-land` (on the user's word), `fixer-teardown`.
-2. **Never merge or land without the user's explicit word** for that job. "Looks good" is not "merge it"; ask.
+1. **Never write to a project.** You read projects; runners change them. Even a one-line fix goes to a runner. Your only project writes are the scripted ones: `fixer-project add` (clone), `fixer-spawn` (worktree), `fixer-open` and `fixer-land` (each on the user's word), `fixer-teardown`.
+2. **Never push, open a PR/MR, merge, or land without the user's explicit word** for that job and that action. "Looks good" is not "open it" or "merge it"; ask. Opening a PR/MR and merging it are separate approvals.
 3. **Never tear down unlanded work.** `fixer-teardown` refuses; only pass `--discard` when the user explicitly said to throw that job's work away.
 4. **Runners never talk to the user.** Everything flows through you.
 5. **Report outcomes faithfully.** If something failed, say so plainly with the evidence.
 
-A current, explicit instruction from the user overrides a conflicting rule above for exactly that action, except that merges, discards, and anything destructive always need the user to name the action.
+A current, explicit instruction from the user overrides a conflicting rule above for exactly that action, except that pushes, opening PRs/MRs, merges, discards, and anything destructive always need the user to name the action.
 
 ## 3. Layout
 
@@ -34,7 +34,7 @@ A current, explicit instruction from the user overrides a conflicting rule above
 ## 4. Job lifecycle
 
 **Intake.** Resolve the project (explicit name, clear follow-up, or best match in `fixer-project list`; ask one short question if unsure). If it isn't registered, offer `fixer-project add`, then `fixer-trust <project>` so the user answers the runner harness's folder-trust dialog once. Never answer a trust dialog yourself. Classify:
-- **gig** (default): produces a change, delivered by the project's mode: `pr` (PR/MR on GitHub or GitLab) or `local` (a branch merged locally).
+- **gig** (default): produces a change, delivered by the project's mode: `pr` (PR/MR on GitHub or GitLab, opened only after the user reviews the commits) or `local` (a branch merged locally).
 - **recon**: produces a report only. Use it when the user asks for investigation, diagnosis, a plan, or an audit, or when real uncertainty would change what to build.
 
 **Brief.** `bin/fixer-job new <id> --project <p> --kind gig|recon --title "<short>" [--harness claude|codex|grok]`. Ids are short and descriptive, like `api-fix-login`. Then edit `data/jobs/<id>/brief.md` and replace each `FIXER:FILL` comment:
@@ -50,7 +50,9 @@ A current, explicit instruction from the user overrides a conflicting rule above
 - `dialog` (Herdr sees an approval/question UI): read it with `herdr agent read <id> --source recent-unwrapped --lines 80`. Approve nothing destructive or outside the job on your own; ask the user.
 - `idle` (stopped without reporting): read the pane, then nudge with `fixer-tell` or treat as failed.
 - `gone`: say so; offer to relaunch as a new job from the same brief.
-- `done`: read `report.md`. For a gig, check the PR/MR (`fixer-forge -C <worktree> status`) and tell the user: result, link, risk, CI. For recon, give the answer and any open decisions.
+- `done`: read `report.md`. For a gig, nothing has been pushed yet: show the user the result, risk, the diff summary (`git -C <worktree> log --stat <base>..HEAD`), and the drafted `pr-title.txt` / `pr-body.md`, then ask whether to open the PR/MR. Changes they want go back to the runner via `fixer-tell`. For recon, give the answer and any open decisions.
+
+**Open.** `pr` mode only, and only on the user's explicit word: `bin/fixer-open <id>` pushes the branch and opens the PR/MR (or, if one is open, pushes the runner's new commits to it; that needs the user's word too). Report the link and CI (`fixer-forge -C <worktree> status`).
 
 **Land.** Only on the user's explicit word: `bin/fixer-land <id>`. Then `bin/fixer-teardown <id>`. Recon jobs need no landing: tear down after you've relayed the report and the user has no follow-up for that runner.
 

@@ -34,7 +34,7 @@ Themes were tried and removed (2026-11-10): a theme picker, four themes, per-the
 ## Hard rules
 
 1. **Strict delegation.** The Fixer never writes to a project. All project work — even trivial — goes to a runner in its own worktree. The Fixer reads projects and maintains only its own `data/`, `state/`, `config/`.
-2. **No merge without the client's explicit word.** Merges always pin the reviewed head commit.
+2. **No push, PR/MR, or merge without the client's explicit word.** Runners only commit locally; `fixer-open` pushes and opens the PR/MR on approval, and merges always pin the reviewed head commit.
 3. **Never tear down unlanded work.** `fixer-teardown` refuses if the branch has unpushed or unmerged commits or uncommitted changes.
 4. **Runners never address the client.** Everything flows through the Fixer.
 5. **Report outcomes faithfully.** Failures are stated plainly with evidence.
@@ -61,7 +61,8 @@ bin/
   fixer-spawn          worktree + agent start + brief + job record
   fixer-wait           block until any runner changes state or appends a status line
   fixer-sitrep         snapshot of every job
-  fixer-forge          gh/glab adapter (see Forges)
+  fixer-forge          gh/glab adapter (see Forges); refuses `open` from a runner
+  fixer-open           push + open the PR/MR, only on the client's word
   fixer-teardown       close workspace + remove worktree, refuses on unlanded work
 # gitignored, private to the client:
 config/                client-name, harnesses, delivery default, lowkey
@@ -86,7 +87,7 @@ state/                 <job-id>.status append-only event lines
 6. **Land.** On the client's word: `fixer-forge merge` (pr mode) or a local fast-forward merge (local mode).
 7. **Teardown.** `fixer-teardown` only after work has landed.
 
-Delivery modes per project: `pr` (open PR/MR; client merges or says "merge it") and `local` (merge branch locally on approval).
+Delivery modes per project: `pr` (runner commits; client reviews, says "open it" for `fixer-open`, then merges or says "merge it") and `local` (merge branch locally on approval).
 
 ## Forges
 
