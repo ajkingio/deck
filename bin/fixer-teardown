@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# fixer-teardown: close a job's Herdr workspace and remove its worktree.
+#
+#   fixer-teardown <id>             refuses unless the work has landed
+#   fixer-teardown <id> --discard   the client explicitly said to throw this work away
+#
+# Landed means: gig/pr -> PR/MR merged; gig/local -> branch merged into base;
+# recon -> report.md exists. The fixer/<id> branch is deleted only when landed;
+# with --discard the branch is kept as a last safety net.
+. "$(dirname "$0")/fixer-lib.sh"
+
+id=${1:-}; shift || true
+require_job "$id"
+discard=0
+[ "${1:-}" = --discard ] && discard=1
+
+dir=$(job_dir "$id")
+kind=$(job_get "$id" kind)
+mode=$(job_get "$id" mode)
+branch=$(job_get "$id" branch)
+base=$(job_get "$id" base)
+wt=$(job_get "$id" worktree)
+ws=$(job_get "$id" workspace)
+ppath=$(project_get "$(job_get "$id" project)" path)
+
+landed=0
+case $kind:$mode in
+  recon:*) [ -s "$dir/report.md" ] && landed=1 ;;
+  gig:pr)
+    st=$("$FIXER_BIN/fixer-forge" -C "$ppath" status "$branch" 2>/dev/null | jq -r .state 2>/dev/null)
+    [ "$st" = merged ] && landed=1 ;;
+  gig:local)
+    git -C "$ppath" merge-base --is-ancestor "$branch" "$base" 2>/dev/null && landed=1 ;;
+esac
+
+dirty=""
+[ -d "$wt" ] && dirty=$(git -C "$wt" status --porcelain 2>/dev/null)
+
+if [ $discard = 0 ]; then
+  [ $landed = 1 ] || die "job $id has not landed; refusing. If the client explicitly wants it thrown away: fixer-teardown $id --discard"
+  [ -z "$dirty" ] || die "worktree $wt has uncommitted changes; refusing"
+fi
+
+# Close only the workspace this job created, and only if it still carries our label.
+if [ -n "$ws" ] && command -v herdr >/dev/null 2>&1; then
+  label=$(herdr workspace list 2>/dev/null | jq -r --arg w "$ws" '.result.workspaces[] | select(.workspace_id == $w) | .label' 2>/dev/null)
+  if [ "$label" = "$id" ]; then
+    herdr workspace close "$ws" >/dev/null 2>&1 || warn "could not close Herdr workspace $ws"
+  elif [ -n "$label" ]; then
+    warn "workspace $ws is now labelled '$label', not '$id'; leaving it open"
+  fi
+fi
+
+if [ -d "$wt" ]; then
+  if [ $discard = 1 ]; then
+    git -C "$ppath" worktree remove --force "$wt" || die "could not remove worktree $wt"
+  else
+    git -C "$ppath" worktree remove "$wt" || die "could not remove worktree $wt"
+  fi
+fi
+git -C "$ppath" worktree prune 2>/dev/null || true
+
+if [ $landed = 1 ]; then
+  git -C "$ppath" branch -D "$branch" >/dev/null 2>&1 || true
+  job_set "$id" status closed
+else
+  job_set "$id" status cancelled
+  echo "kept branch $branch in $ppath"
+fi
+echo "tore down $id"

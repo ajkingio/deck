@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# fixer-start: everything the Fixer needs at session start, in one read.
+# Run exactly once at the start of every session.
+. "$(dirname "$0")/fixer-lib.sh"
+
+echo "# FIXER SESSION START $(now)"
+
+if [ ! -f "$FIXER_CONF" ]; then
+  echo
+  echo "## SETUP REQUIRED"
+  echo "This clone hasn't been set up. Tell the user, in one or two plain sentences, to quit this"
+  echo "session and run ./setup in a normal terminal from $FIXER_ROOT; it checks their machine,"
+  echo "picks a theme, sets up folder trust, and installs the launcher alias (jackin for the"
+  echo "default theme). Do nothing else until then."
+  exit 0
+fi
+
+if [ "$(conf_get "$FIXER_CONF" onboarded no)" != yes ]; then
+  echo
+  echo "## FIRST RUN"
+  echo "Setup is done but this is the first session. Load the onboarding skill after reading the rest."
+fi
+
+theme=$(conf_get "$FIXER_CONF" theme plain)
+echo
+echo "## Config"
+cat "$FIXER_CONF"
+
+echo
+echo "## Theme: $theme (voice for chat only)"
+if [ -f "$FIXER_ROOT/themes/$theme.md" ]; then fm_body "$FIXER_ROOT/themes/$theme.md"; else echo "theme file missing; use plain voice and tell the client"; fi
+
+echo
+echo "## Client profile"
+if [ -s "$FIXER_DATA/profile.md" ]; then cat "$FIXER_DATA/profile.md"; else echo "(empty)"; fi
+
+echo
+echo "## Fixer engrams"
+n=0
+if [ -d "$FIXER_DATA/engrams" ]; then
+  for f in "$FIXER_DATA/engrams"/*.md; do
+    [ -f "$f" ] || continue
+    case $(fm_get "$f" audience) in fixer|both) ;; *) continue ;; esac
+    printf -- '- [%s] %s\n' "$(fm_get "$f" scope)" "$(fm_body "$f" | sed '/^[[:space:]]*$/d' | tr '\n' ' ')"
+    n=$((n + 1))
+  done
+fi
+[ $n = 0 ] && echo "(none)"
+
+echo
+echo "## Projects"
+"$FIXER_BIN/fixer-project" list
+
+"$FIXER_BIN/fixer-sitrep"
+
+echo
+echo "## Doctor"
+"$FIXER_BIN/fixer-doctor" --brief || true
+echo "(only problems are listed)"

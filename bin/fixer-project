@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# fixer-project: register the projects the Fixer can hire runners for.
+#
+#   fixer-project add <git-url|local-path> [--name <n>] [--mode pr|local] [--base <branch>] [--forge github|gitlab]
+#   fixer-project list
+#   fixer-project show <name>
+#
+# A git URL is cloned into projects/<name>. A local path is used in place.
+# Project records live in data/projects/<name>.conf.
+. "$(dirname "$0")/fixer-lib.sh"
+
+cmd=${1:-}; shift || true
+case $cmd in
+add)
+  src=${1:-}; shift || true
+  [ -n "$src" ] || die "usage: fixer-project add <git-url|local-path> [--name n] [--mode pr|local] [--base b] [--forge github|gitlab]"
+  name="" mode="" base="" forge=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --name) name=$2; shift 2 ;;
+      --mode) mode=$2; shift 2 ;;
+      --base) base=$2; shift 2 ;;
+      --forge) forge=$2; shift 2 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  [ -n "$name" ] || name=$(basename "$src" .git | tr 'A-Z_' 'a-z-')
+  valid_id "$name" || die "invalid project name '$name'; pass --name"
+  [ -f "$(project_conf "$name")" ] && die "project $name is already registered"
+
+  if [ -d "$src" ]; then
+    path=$(cd "$src" && pwd -P)
+    git -C "$path" rev-parse --git-dir >/dev/null 2>&1 || die "$path is not a git repository"
+  else
+    need git
+    mkdir -p "$FIXER_ROOT/projects"
+    path="$FIXER_ROOT/projects/$name"
+    [ -e "$path" ] && die "$path already exists"
+    git clone --quiet "$src" "$path" || die "clone failed: $src"
+  fi
+
+  if [ -z "$base" ]; then
+    base=$(git -C "$path" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
+    [ -n "$base" ] || base=$(git -C "$path" symbolic-ref --quiet --short HEAD 2>/dev/null)
+    [ -n "$base" ] || base=main
+  fi
+  [ -n "$forge" ] || forge=$("$FIXER_BIN/fixer-forge" -C "$path" detect 2>/dev/null || true)
+  [ -n "$forge" ] || forge=none
+  if [ -z "$mode" ]; then
+    mode=$(conf_get "$FIXER_CONF" default_mode pr)
+    [ "$forge" = none ] && mode=local
+  fi
+  case $mode in pr|local) ;; *) die "--mode must be pr or local" ;; esac
+  [ "$mode" = pr ] && [ "$forge" = none ] && die "mode pr needs a GitHub or GitLab remote; pass --forge or use --mode local"
+
+  f=$(project_conf "$name")
+  conf_set "$f" name "$name"
+  conf_set "$f" path "$path"
+  conf_set "$f" remote "$(git -C "$path" remote get-url origin 2>/dev/null || true)"
+  conf_set "$f" forge "$forge"
+  conf_set "$f" mode "$mode"
+  conf_set "$f" base "$base"
+  conf_set "$f" added "$(now)"
+  echo "registered $name: path=$path forge=$forge mode=$mode base=$base"
+  ;;
+list)
+  [ -d "$FIXER_PROJECTS" ] || { echo "(no projects)"; exit 0; }
+  found=0
+  for f in "$FIXER_PROJECTS"/*.conf; do
+    [ -f "$f" ] || continue
+    found=1
+    printf '%-20s %-7s %-6s %-12s %s\n' "$(conf_get "$f" name)" "$(conf_get "$f" forge)" "$(conf_get "$f" mode)" "$(conf_get "$f" base)" "$(conf_get "$f" path)"
+  done
+  [ $found = 1 ] || echo "(no projects)"
+  ;;
+show)
+  require_project "${1:-}"
+  cat "$(project_conf "$1")"
+  ;;
+*)
+  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  exit 2
+  ;;
+esac

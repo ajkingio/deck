@@ -1,0 +1,7 @@
+# Private to each client's clone. Never committed.
+/config/
+/data/
+/state/
+/projects/
+/.claude/settings.local.json
+.DS_Store

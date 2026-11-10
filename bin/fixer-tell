@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# fixer-tell: send a message to a runner (an answer, a steer, a stop request).
+#
+#   fixer-tell <id> "<message>"
+#
+# Refuses if the runner is sitting at an approval/question dialog; inspect it with
+# `herdr agent read <id> --source recent-unwrapped --lines 80` and ask the client.
+. "$(dirname "$0")/fixer-lib.sh"
+
+id=${1:-}; shift || true
+require_job "$id"
+msg="$*"
+[ -n "$msg" ] || die "usage: fixer-tell <id> \"<message>\""
+need herdr; need jq
+
+out=$(herdr agent prompt "$id" "Message from fixer: $msg" --wait --timeout 15000 2>&1)
+rc=$?
+code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
+case "$rc:$code" in
+  0:|*:timeout) ;;
+  *:agent_blocked) die "runner $id is at a dialog; read it with: herdr agent read $id --source recent-unwrapped --lines 80" ;;
+  *) die "could not reach runner $id ($code): $out" ;;
+esac
+printf '%s %s\n' "$(now)" "$msg" >>"$(job_dir "$id")/messages.log"
+case $(job_get "$id" status) in blocked) job_set "$id" status running ;; esac
+echo "told $id"

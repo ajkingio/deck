@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# fixer-launch: open fixer. This is what the launcher alias (e.g. `jackin`) runs.
+#
+#   fixer-launch           open or start the Herdr session and greet the Fixer
+#   fixer-launch --new     replace any existing session without asking first
+#                          (still confirms if runners are live)
+#
+# Fresh start: a headless Herdr server for the session (default name: fixer),
+# one workspace at this repo, the Fixer's harness started there with the
+# theme's opening line (netrunner: claude "jack in"), then attach.
+# If the session already exists: asks to open it or start a new one. A new one
+# replaces the old: stopping it ends every pane in it, so live runners are
+# listed and must be confirmed. Worktrees and job records on disk are kept.
+. "$(dirname "$0")/fixer-lib.sh"
+
+need herdr; need jq
+[ -f "$FIXER_CONF" ] || die "fixer isn't set up yet; run $FIXER_ROOT/setup first"
+
+session=$(conf_get "$FIXER_CONF" herdr_session fixer)
+harness=$(conf_get "$FIXER_CONF" fixer_harness claude)
+theme=$(conf_get "$FIXER_CONF" theme netrunner)
+greeting=$(theme_get "$theme" greeting)
+[ -n "$greeting" ] || greeting=start
+command -v "$harness" >/dev/null 2>&1 || die "$harness is not installed"
+
+force_new=0
+[ "${1:-}" = --new ] && force_new=1
+
+H() { herdr --session "$session" "$@"; }
+
+ask() { # <prompt> -> reply on stdout
+  local r
+  printf '%s' "$1" >/dev/tty
+  read -r r </dev/tty || r=""
+  printf '%s\n' "$r"
+}
+
+session_exists() {
+  herdr session list --json 2>/dev/null | jq -e --arg n "$session" '.sessions[] | select(.name == $n)' >/dev/null 2>&1
+}
+
+session_running() {
+  herdr session list --json 2>/dev/null | jq -e --arg n "$session" '.sessions[] | select(.name == $n and .running == true)' >/dev/null 2>&1
+}
+
+live_runners() { # job ids this home thinks are live
+  local id
+  for id in $(job_ids); do
+    case $(job_get "$id" status) in starting|running|blocked) printf '%s\n' "$id" ;; esac
+  done
+}
+
+attach() {
+  [ "${FIXER_LAUNCH_NO_ATTACH:-}" = 1 ] && { echo "ready: herdr session attach $session"; exit 0; }  # tests
+  if [ "${HERDR_ENV:-}" = 1 ]; then
+    echo "You're inside Herdr already. To switch to the '$session' session, detach from this one and run:"
+    echo "  herdr session attach $session"
+    exit 0
+  fi
+  exec herdr session attach "$session"
+}
+
+shell_idle() { # <pane>: true when only the shell itself is in the foreground
+  H pane process-info --pane "$1" 2>/dev/null |
+    jq -e '.result.process_info | .shell_pid as $s | [.foreground_processes[]?.pid] | all(. == $s)' >/dev/null 2>&1
+}
+
+fresh_start() {
+  mkdir -p "$FIXER_STATE"
+  (nohup herdr --session "$session" server >"$FIXER_STATE/herdr-$session.log" 2>&1 &)
+  local i=0
+  until H workspace list >/dev/null 2>&1; do
+    i=$((i + 1)); [ $i -gt 40 ] && die "Herdr session '$session' didn't start; see $FIXER_STATE/herdr-$session.log"
+    sleep 0.25
+  done
+  local before out pane code
+  before=$(H workspace list | jq -r '.result.workspaces[].workspace_id')
+  out=$(H workspace create --cwd "$FIXER_ROOT" --label fixer --focus) || die "could not create the fixer workspace: $out"
+  pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id')
+  # Close the empty workspace a new server opens, so fixer is the only one, but
+  # only once its shell has finished starting: killing a shell mid-startup can
+  # leave tools like pyenv holding a stale lock that slows every later shell.
+  (
+    for w in $before; do
+      p=$(H pane list --workspace "$w" 2>/dev/null | jq -r '.result.panes[0].pane_id // empty')
+      n=0
+      while [ -n "$p" ] && [ $n -lt 240 ] && ! shell_idle "$p"; do n=$((n + 1)); sleep 0.5; done
+      H workspace close "$w" >/dev/null 2>&1 || true
+    done
+  ) >/dev/null 2>&1 &
+  # Start the Fixer with the greeting as its first prompt. agent start waits for
+  # the new shell's prompt (retry while it is still starting up), so the
+  # command can't be typed into a shell that isn't ready yet.
+  i=0
+  while :; do
+    out=$(H agent start fixer --kind "$harness" --pane "$pane" --timeout 60000 -- "$greeting" 2>&1) && break
+    code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
+    case $code in
+      agent_pane_busy)
+        # Shell startup files (pyenv, nvm, conda...) can be slow; give them time.
+        i=$((i + 1))
+        [ $i = 10 ] && echo "waiting for your shell to finish starting up..."
+        if [ $i -gt 240 ]; then
+          echo "Your shell in the '$session' session is still starting (something in your shell startup is slow)."
+          echo "Once its prompt appears, start the Fixer yourself:  $harness \"$greeting\""
+          sleep 3
+          break
+        fi
+        sleep 0.5 ;;
+      # A trust dialog or similar is waiting: the client is about to attach and answer it.
+      agent_not_ready|timeout) break ;;
+      *) die "could not start $harness: $out" ;;
+    esac
+  done
+}
+
+if session_exists && [ $force_new = 0 ]; then
+  state="running"; session_running || state="saved, not running"
+  echo "A Herdr session named '$session' already exists ($state)."
+  reply=$(ask "  [o]pen it, start a [n]ew one, or [c]ancel? [o] ")
+  case $reply in
+    ""|o|O|open) attach ;;
+    n|N|new) ;;
+    *) echo "cancelled"; exit 0 ;;
+  esac
+fi
+
+if session_exists; then
+  live=$(live_runners)
+  if [ -n "$live" ]; then
+    echo "These runners are live in '$session'. Replacing the session stops them mid-job:"
+    printf '  - %s\n' $live
+    echo "Their worktrees and job records stay on disk; the Fixer will report them as gone."
+    reply=$(ask "  Type 'replace' to stop them and start fresh: ")
+    [ "$reply" = replace ] || { echo "cancelled; nothing changed"; exit 0; }
+  fi
+  herdr session stop "$session" >/dev/null 2>&1 || true
+  herdr session delete "$session" >/dev/null 2>&1 || die "could not delete the old '$session' session"
+fi
+
+fresh_start
+attach

@@ -1,0 +1,214 @@
+#!/usr/bin/env bash
+# fixer setup: run once after cloning your fork, in a normal terminal.
+#
+#   ./setup
+#
+# Safe to run again: your current answers become the defaults. Every change to
+# anything outside this folder (your shell rc file, Herdr agent hooks, logins)
+# is asked about first.
+. "$(dirname "$0")/bin/fixer-lib.sh"
+
+B=$'\033[1m' D=$'\033[2m' C=$'\033[36m' M=$'\033[35m' G=$'\033[32m' Y=$'\033[33m' R=$'\033[31m' X=$'\033[0m'
+[ -t 1 ] || { B="" D="" C="" M="" G="" Y="" R="" X=""; }
+
+step() { printf '\n%s▌%s %s%s%s\n' "$M" "$X" "$B" "$*" "$X"; }
+ok() { printf '  %s✓%s %s\n' "$G" "$X" "$*"; }
+note() { printf '  %s%s%s\n' "$D" "$*" "$X"; }
+bad() { printf '  %s✗%s %s\n' "$R" "$X" "$*"; }
+warn_() { printf '  %s!%s %s\n' "$Y" "$X" "$*"; }
+
+ask() { # <question> <default> -> answer
+  local r
+  if [ -n "$2" ]; then printf '  %s %s[%s]%s ' "$1" "$D" "$2" "$X" >/dev/tty; else printf '  %s ' "$1" >/dev/tty; fi
+  read -r r </dev/tty || r=""
+  printf '%s\n' "${r:-$2}"
+}
+
+confirm() { # <question> <Y|N> -> 0 for yes
+  local d=$2 r
+  r=$(ask "$1 ($( [ "$d" = Y ] && echo Y/n || echo y/N ))" "")
+  [ -n "$r" ] || r=$d
+  case $r in y|Y|yes|Yes) return 0 ;; *) return 1 ;; esac
+}
+
+choose() { # <question> <default> <option>... -> chosen option
+  local q=$1 d=$2 r; shift 2
+  while :; do
+    r=$(ask "$q ($(printf '%s/' "$@" | sed 's#/$##'))" "$d")
+    for o in "$@"; do [ "$r" = "$o" ] && { printf '%s\n' "$r"; return; }; done
+    printf '  %spick one of: %s%s\n' "$Y" "$*" "$X" >/dev/tty
+  done
+}
+
+cur() { conf_get "$FIXER_CONF" "$1" "${2:-}"; }
+
+printf '%s\n' "${C}" '   ┌─┐┬─┐ ┬┌─┐┬─┐' '   ├┤ │┌┴┬┘├┤ ├┬┘' '   └  ┴┴ └─└─┘┴└─' "${X}${D}   setup · $FIXER_ROOT${X}"
+
+if [ "${HERDR_ENV:-}" = 1 ]; then
+  warn_ "You're running this inside Herdr. That works, but the launcher is meant to start Herdr for you."
+fi
+
+# ------------------------------------------------------------ dependencies
+step "Checking your machine"
+missing=0
+for t in git jq; do
+  if command -v $t >/dev/null 2>&1; then ok "$t"; else bad "$t is missing"; missing=1; fi
+done
+if command -v herdr >/dev/null 2>&1; then
+  v=$(herdr --version 2>/dev/null | awk '{print $2}'); maj=${v%%.*}; rest=${v#*.}; min=${rest%%.*}
+  if [ "${maj:-0}" -gt 0 ] || [ "${min:-0}" -ge 9 ]; then ok "herdr $v"; else bad "herdr $v is too old (need 0.9+): run 'herdr update'"; missing=1; fi
+else
+  bad "herdr is missing: install it from https://herdr.dev"; missing=1
+fi
+harnesses=""
+for h in $FIXER_HARNESSES; do command -v "$h" >/dev/null 2>&1 && harnesses="$harnesses $h"; done
+harnesses=${harnesses# }
+if [ -n "$harnesses" ]; then ok "agents: $harnesses"; else bad "no supported agent found: install Claude Code, Codex or Grok"; missing=1; fi
+for t in gh glab; do
+  if command -v $t >/dev/null 2>&1; then ok "$t"; else note "$t not installed (only needed for $( [ $t = gh ] && echo GitHub || echo GitLab ) PRs/MRs)"; fi
+done
+if [ $missing = 1 ] && command -v brew >/dev/null 2>&1; then
+  pkgs=""
+  command -v jq >/dev/null 2>&1 || pkgs="$pkgs jq"
+  command -v git >/dev/null 2>&1 || pkgs="$pkgs git"
+  if [ -n "$pkgs" ] && confirm "Install$pkgs with Homebrew?" Y; then brew install $pkgs; fi
+fi
+for t in git jq herdr; do command -v $t >/dev/null 2>&1 || die "install $t, then run ./setup again"; done
+[ -n "$harnesses" ] || die "install an agent (claude, codex or grok), then run ./setup again"
+if [ -z "$(git config user.name)" ] || [ -z "$(git config user.email)" ]; then
+  warn_ "git user.name / user.email aren't set; runners need them to commit"
+  n=$(ask "Your name for git commits:" "")
+  e=$(ask "Your email for git commits:" "")
+  [ -n "$n" ] && git config --global user.name "$n"
+  [ -n "$e" ] && git config --global user.email "$e"
+fi
+
+# ------------------------------------------------------------------- theme
+step "Pick a theme"
+for t in "$FIXER_ROOT"/themes/*.md; do
+  tn=$(basename "$t" .md)
+  printf '  %s%-10s%s %s %s(%s)%s\n' "$C" "$tn" "$X" "$(fm_get "$t" description)" "$D" "launch with: $(fm_get "$t" launcher)" "$X"
+done
+note "Want your own? Pick one now; once you're in, ask the Fixer to make a custom theme (/retheme)."
+themes=$(for t in "$FIXER_ROOT"/themes/*.md; do basename "$t" .md; done)
+# shellcheck disable=SC2086
+theme=$(choose "Theme:" "$(cur theme netrunner)" $themes)
+title=$(theme_get "$theme" client_title)
+client=$(ask "What should the Fixer call you?" "$(cur client_name "${title:-}")")
+
+# ----------------------------------------------------------------- harness
+step "Agents"
+first=${harnesses%% *}
+default_fh=$(cur fixer_harness "$( case " $harnesses " in *" claude "*) echo claude ;; *) echo "$first" ;; esac )")
+# shellcheck disable=SC2086
+fixer_h=$(choose "Which agent is the Fixer (the one you talk to)?" "$default_fh" $harnesses)
+# shellcheck disable=SC2086
+runner_h=$(choose "Which agent should runners use by default?" "$(cur runner_harness "$fixer_h")" $harnesses)
+mode=$(choose "Default delivery for new projects: pr (open a PR/MR) or local (merge branches locally)?" "$(cur default_mode pr)" pr local)
+
+mkdir -p "$(dirname "$FIXER_CONF")"
+conf_set "$FIXER_CONF" theme "$theme"
+conf_set "$FIXER_CONF" client_name "$client"
+conf_set "$FIXER_CONF" fixer_harness "$fixer_h"
+conf_set "$FIXER_CONF" runner_harness "$runner_h"
+conf_set "$FIXER_CONF" default_mode "$mode"
+conf_set "$FIXER_CONF" claude_permission_mode "$(cur claude_permission_mode auto)"
+conf_set "$FIXER_CONF" notify "$(cur notify on)"
+conf_set "$FIXER_CONF" calm "$(cur calm off)"
+conf_set "$FIXER_CONF" herdr_session "$(cur herdr_session fixer)"
+[ -n "$(cur onboarded)" ] || conf_set "$FIXER_CONF" onboarded no
+ok "saved config/fixer.conf"
+
+# ------------------------------------------------------- herdr agent hooks
+step "Herdr agent hooks"
+note "These let Herdr see exactly when an agent is working, idle, or waiting on you. fixer's watcher relies on that."
+status=$(herdr integration status 2>/dev/null || true)
+for h in $(printf '%s\n%s\n' "$fixer_h" "$runner_h" | sort -u); do
+  line=$(printf '%s\n' "$status" | grep -E "^$h:" | head -n1)
+  case $line in
+    *current*) ok "$h: installed" ;;
+    *outdated*|*"not installed"*|"")
+      if confirm "Install Herdr's hooks for $h? (${line#*: })" Y; then
+        herdr integration install "$h" && ok "$h: installed" || bad "$h: install failed"
+      else
+        note "skipped; Herdr will guess $h's state from the screen instead"
+      fi ;;
+    *) note "$h: $line" ;;
+  esac
+done
+
+# ------------------------------------------------------------ forge logins
+step "GitHub / GitLab"
+if command -v gh >/dev/null 2>&1; then
+  if gh auth status >/dev/null 2>&1; then ok "gh is logged in"
+  elif confirm "Log in to GitHub with gh now?" Y; then gh auth login </dev/tty; fi
+fi
+if command -v glab >/dev/null 2>&1; then
+  if glab auth status >/dev/null 2>&1; then ok "glab is logged in"
+  elif confirm "Log in to GitLab with glab now?" N; then glab auth login </dev/tty; fi
+fi
+command -v gh >/dev/null 2>&1 || command -v glab >/dev/null 2>&1 || note "neither gh nor glab is installed; projects will use local mode"
+
+# --------------------------------------------------------- upstream remote
+step "Staying up to date"
+if git -C "$FIXER_ROOT" remote get-url upstream >/dev/null 2>&1; then
+  ok "upstream: $(git -C "$FIXER_ROOT" remote get-url upstream)"
+else
+  guess=""
+  if command -v gh >/dev/null 2>&1; then
+    guess=$(cd "$FIXER_ROOT" && gh repo view --json parent -q '.parent | select(. != null) | "https://github.com/\(.owner.login)/\(.name)"' 2>/dev/null || true)
+  fi
+  note "Your fork is 'origin'. Adding the original repo as 'upstream' lets you pull fixer updates."
+  url=$(ask "Upstream repo URL (blank to skip):" "$guess")
+  if [ -n "$url" ]; then git -C "$FIXER_ROOT" remote add upstream "$url" && ok "added upstream: $url"; else note "skipped"; fi
+fi
+
+# ------------------------------------------------------------ fewer prompts
+if [ "$fixer_h" = claude ]; then
+  step "Fewer permission prompts"
+  note "Lets the Fixer run its routine scripts without asking each time (this clone only)."
+  note "Merging, teardown, cloning and trust always still ask. Undo with: bin/fixer-allow --remove"
+  if confirm "Allow fixer's routine scripts?" Y; then "$FIXER_BIN/fixer-allow" | head -n1 | sed 's/^/  /'; fi
+fi
+
+# ------------------------------------------------------------------- trust
+step "Folder trust"
+note "Each agent asks once whether you trust a repository, and runners can't answer that."
+note "Trust is per repository, so one answer covers every runner worktree of a project."
+if harness_trusts "$fixer_h" "$FIXER_ROOT"; then
+  ok "$fixer_h trusts the fixer folder"
+elif confirm "Trust the fixer folder for $fixer_h now, so your first launch is clean?" Y; then
+  "$FIXER_BIN/fixer-trust" --path "$FIXER_ROOT" --harness "$fixer_h" | sed 's/^/  /'
+fi
+
+if [ -n "$(ls "$FIXER_PROJECTS" 2>/dev/null)" ]; then
+  for f in "$FIXER_PROJECTS"/*.conf; do
+    p=$(conf_get "$f" name)
+    if harness_trusts "$runner_h" "$(conf_get "$f" path)"; then ok "$runner_h trusts project $p"
+    elif confirm "Trust project $p for $runner_h now?" Y; then "$FIXER_BIN/fixer-trust" "$p" --harness "$runner_h" | sed 's/^/  /'; fi
+  done
+fi
+while confirm "Register a project now? (you can also just ask the Fixer later)" N; do
+  src=$(ask "Git URL or local path:" "")
+  [ -n "$src" ] || continue
+  out=$("$FIXER_BIN/fixer-project" add "$src" 2>&1) || { bad "$out"; continue; }
+  ok "$out"
+  p=$(printf '%s' "$out" | sed -E 's/^registered ([^:]+):.*/\1/')
+  if confirm "Trust $p for $runner_h now?" Y; then "$FIXER_BIN/fixer-trust" "$p" --harness "$runner_h" | sed 's/^/  /'; fi
+done
+
+# ---------------------------------------------------------------- launcher
+step "Launcher"
+alias_name=$(theme_get "$theme" launcher); alias_name=${alias_name:-fixer}
+greeting=$(theme_get "$theme" greeting)
+note "'$alias_name' opens the Herdr session '$(cur herdr_session fixer)' in this folder and starts $fixer_h with \"$greeting\"."
+note "If that session already exists, it asks whether to open it or start a new one."
+if confirm "Add the '$alias_name' alias to your shell config?" Y; then
+  "$FIXER_BIN/fixer-launcher" install | sed 's/^/  /'
+else
+  note "skipped; you can always run: $FIXER_BIN/fixer-launch"
+fi
+
+# -------------------------------------------------------------------- done
+step "All set"
+printf '  Open a new terminal and type %s%s%s.\n\n' "$C$B" "$alias_name" "$X"

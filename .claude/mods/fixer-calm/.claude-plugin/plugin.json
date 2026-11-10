@@ -1,0 +1,7 @@
+{
+  "name": "fixer-calm",
+  "version": "0.1.0",
+  "description": "fixer /calm: hides tool-call clutter, animates the working row from the theme, shows a crew band and runner event notes",
+  "types": "./types/index.d.ts",
+  "license": "MIT"
+}

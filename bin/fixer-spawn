@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# fixer-spawn: hire a runner for a queued job.
+#
+#   fixer-spawn <id>            create worktree + Herdr workspace, start the runner, send the brief
+#   fixer-spawn <id> --resume   after the client cleared a startup dialog by hand: just send the brief
+#
+# Steps: git worktree add (branch fixer/<id>) -> herdr workspace create ->
+# herdr agent start --kind <harness> -> herdr agent prompt "read your brief".
+# Each job owns exactly one Herdr workspace, labelled with the job id.
+. "$(dirname "$0")/fixer-lib.sh"
+
+id=${1:-}; shift || true
+require_job "$id"
+resume=0
+[ "${1:-}" = --resume ] && resume=1
+
+need git; need jq; need herdr
+[ "${HERDR_ENV:-}" = 1 ] || die "the Fixer is not running inside Herdr; start herdr in the fixer directory and launch your agent inside it"
+
+dir=$(job_dir "$id")
+status=$(job_get "$id" status)
+harness=$(job_get "$id" harness)
+wt=$(job_get "$id" worktree)
+
+if [ $resume = 0 ]; then
+  [ "$status" = queued ] || die "job $id is $status, not queued"
+  grep -q 'FIXER:FILL' "$dir/brief.md" && die "brief still has FIXER:FILL markers; fill them in first: $dir/brief.md"
+  command -v "$harness" >/dev/null 2>&1 || die "runner harness '$harness' is not installed"
+  "$FIXER_BIN/fixer-trust" "$(job_get "$id" project)" --harness "$harness" --check >/dev/null ||
+    die "$harness doesn't trust project $(job_get "$id" project) yet, so the runner would stop at a trust dialog. Run: bin/fixer-trust $(job_get "$id" project) --harness $harness"
+
+  project=$(job_get "$id" project)
+  ppath=$(project_get "$project" path)
+  base=$(job_get "$id" base)
+  branch=$(job_get "$id" branch)
+  [ -d "$ppath" ] || die "project path missing: $ppath"
+  [ -e "$wt" ] && die "worktree path already exists: $wt"
+
+  baseref=$base
+  if git -C "$ppath" remote get-url origin >/dev/null 2>&1; then
+    if git -C "$ppath" fetch --quiet origin "$base" 2>/dev/null; then baseref="origin/$base"; fi
+  fi
+  mkdir -p "$(dirname "$wt")"
+  git -C "$ppath" worktree add --quiet -b "$branch" "$wt" "$baseref" || die "git worktree add failed"
+  wt=$(cd "$wt" && pwd -P)
+  job_set "$id" worktree "$wt"
+  job_set "$id" base_sha "$(git -C "$wt" rev-parse HEAD)"
+
+  out=$(herdr workspace create --cwd "$wt" --label "$id" --no-focus \
+    --env "FIXER_JOB=$id" --env "FIXER_HOME=$FIXER_ROOT" --env "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false" 2>&1) \
+    || die "herdr workspace create failed: $out (worktree left at $wt)"
+  ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id')
+  pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id')
+  job_set "$id" workspace "$ws"
+  job_set "$id" pane "$pane"
+  job_set "$id" status starting
+else
+  [ "$status" = starting ] || die "--resume is only for a job stuck in 'starting' (job $id is $status)"
+  pane=$(job_get "$id" pane)
+  ws=$(job_get "$id" workspace)
+  if [ "$(herdr agent get "$id" 2>/dev/null | jq -r '.result.agent.agent_status // empty')" = blocked ]; then
+    die "runner $id is still at a dialog in Herdr workspace $ws; ask the client to answer it there, then rerun with --resume"
+  fi
+fi
+
+# Start the agent unless one is already in the pane (a --resume after the
+# client answered a startup dialog by hand).
+if ! herdr agent get "$id" >/dev/null 2>&1; then
+  case $harness in
+    claude)
+      set -- --permission-mode "$(conf_get "$FIXER_CONF" claude_permission_mode auto)" \
+        --add-dir "$dir" --append-system-prompt-file "$FIXER_ROOT/templates/runner-system.md" -n "$id" ;;
+    codex)
+      set -- -s workspace-write -a never --add-dir "$dir" \
+        -c sandbox_workspace_write.network_access=true --disable hooks ;;
+    grok)
+      set -- --always-approve ;;
+  esac
+
+  # A brand-new pane's shell may still be starting up; wait for its prompt.
+  tries=0
+  while :; do
+    out=$(herdr agent start "$id" --kind "$harness" --pane "$pane" --timeout 90000 -- "$@" 2>&1) && break
+    code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
+    if [ "$code" = agent_pane_busy ] && [ $tries -lt 30 ]; then tries=$((tries + 1)); sleep 1; continue; fi
+    if [ "$code" = agent_not_ready ]; then
+      die "runner $id is stopped at a startup dialog in Herdr workspace $ws ($id). Read it with: herdr pane read $pane --source visible --lines 40. Ask the client to answer it there, then run: bin/fixer-spawn $id --resume"
+    fi
+    die "herdr agent start failed: $out. Fix the cause, then retry with: bin/fixer-spawn $id --resume"
+  done
+fi
+
+msg="You are runner $id, hired by fixer. Read your brief at $dir/brief.md and follow it exactly. Start now."
+out=$(herdr agent prompt "$id" "$msg" --wait --timeout 20000 2>&1)
+rc=$?
+code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
+# A timeout here is the good case: the runner is still working on the job.
+if [ $rc -ne 0 ] && [ "$code" != timeout ]; then
+  die "could not hand the brief to runner $id ($code): $out"
+fi
+
+job_set "$id" status running
+job_set "$id" started "$(now)"
+echo "spawned $id: harness=$harness workspace=$ws pane=$pane worktree=$wt"
+echo "next: make sure a watcher is running (bin/fixer-wait)"

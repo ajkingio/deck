@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+# fixer-forge: the one place that knows GitHub (gh) vs GitLab (glab).
+#
+#   fixer-forge [-C <dir>] detect
+#   fixer-forge [-C <dir>] open --title "<t>" --body-file <f> [--base <branch>]
+#   fixer-forge [-C <dir>] status [<branch>]
+#   fixer-forge [-C <dir>] merge <branch> --sha <commit> [--method squash|merge|rebase]
+#   fixer-forge [-C <dir>] url [<branch>]
+#
+# <dir> defaults to the current directory and must be inside the project repo.
+# `status` prints normalized JSON:
+#   {"forge","state":"open|merged|closed|none","url","head_sha","ci":"passing|failing|pending|none","mergeable"}
+# `merge` always pins the head commit the client reviewed, and never schedules
+# an auto-merge: it merges now or fails.
+# Forge override: FIXER_FORGE=github|gitlab.
+. "$(dirname "$0")/fixer-lib.sh"
+
+dir=$PWD
+if [ "${1:-}" = -C ]; then dir=$2; shift 2; fi
+cd "$dir" 2>/dev/null || die "no such directory: $dir"
+git rev-parse --git-dir >/dev/null 2>&1 || die "$dir is not a git repository"
+
+remote_host() {
+  local u
+  u=$(git remote get-url origin 2>/dev/null) || return 1
+  case $u in
+    *://*) u=${u#*://}; u=${u#*@}; u=${u%%/*}; u=${u%%:*} ;;
+    *@*:*) u=${u#*@}; u=${u%%:*} ;;
+    *) return 1 ;;
+  esac
+  printf '%s\n' "$u"
+}
+
+detect() {
+  local h
+  if [ -n "${FIXER_FORGE:-}" ]; then printf '%s\n' "$FIXER_FORGE"; return 0; fi
+  h=$(remote_host) || return 1
+  case $h in
+    github.com) echo github; return 0 ;;
+    gitlab.com) echo gitlab; return 0 ;;
+  esac
+  if command -v glab >/dev/null 2>&1 && glab auth status --hostname "$h" >/dev/null 2>&1; then echo gitlab; return 0; fi
+  if command -v gh >/dev/null 2>&1 && gh auth status --hostname "$h" >/dev/null 2>&1; then echo github; return 0; fi
+  return 1
+}
+
+forge=$(detect) || forge=""
+cmd=${1:-}; shift || true
+
+require_forge() {
+  [ -n "$forge" ] || die "cannot tell whether $(git remote get-url origin 2>/dev/null || echo 'this repo') is GitHub or GitLab; set forge= in the project record or FIXER_FORGE"
+  case $forge in
+    github) need gh ;;
+    gitlab) need glab ;;
+    *) die "unsupported forge: $forge" ;;
+  esac
+}
+
+current_branch() { git symbolic-ref --quiet --short HEAD || die "detached HEAD; pass a branch"; }
+
+case $cmd in
+detect)
+  [ -n "$forge" ] || exit 1
+  echo "$forge"
+  ;;
+
+open)
+  require_forge
+  title="" body="" base=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --title) title=$2; shift 2 ;;
+      --body-file) body=$2; shift 2 ;;
+      --base) base=$2; shift 2 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  [ -n "$title" ] || die "open needs --title"
+  [ -f "$body" ] || die "open needs --body-file <existing file>"
+  branch=$(current_branch)
+  if [ -z "$base" ] && [ -n "${FIXER_JOB:-}" ] && [ -f "$(job_conf "$FIXER_JOB")" ]; then base=$(job_get "$FIXER_JOB" base); fi
+  [ -n "$base" ] || base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##')
+  [ -n "$base" ] || die "cannot determine base branch; pass --base"
+  # Push explicitly so a push failure is reported as a push failure.
+  git push --quiet -u origin "$branch" || die "git push failed for $branch"
+  case $forge in
+    github) gh pr create --head "$branch" --base "$base" --title "$title" --body-file "$body" ;;
+    gitlab)
+      out=$(glab mr create --source-branch "$branch" --target-branch "$base" --title "$title" \
+        --description "$(cat "$body")" --push=false --yes 2>&1) || die "glab mr create failed: $out"
+      printf '%s\n' "$out" | grep -Eo 'https?://[^ ]+/-/merge_requests/[0-9]+' | tail -n1
+      ;;
+  esac
+  ;;
+
+status)
+  require_forge
+  branch=${1:-$(current_branch)}
+  case $forge in
+    github)
+      out=$(gh pr view "$branch" --json state,url,headRefOid,mergeable,statusCheckRollup 2>/dev/null) || {
+        echo '{"forge":"github","state":"none"}'; exit 0; }
+      printf '%s' "$out" | jq -c '{
+        forge: "github",
+        state: (.state | ascii_downcase | if . == "open" then "open" elif . == "merged" then "merged" else "closed" end),
+        url, head_sha: .headRefOid,
+        ci: ([.statusCheckRollup[]? | (.conclusion // .state // "" | ascii_downcase)] as $c |
+             if ($c | length) == 0 then "none"
+             elif any($c[]; . == "failure" or . == "error" or . == "cancelled" or . == "timed_out" or . == "action_required") then "failing"
+             elif all($c[]; . == "success" or . == "neutral" or . == "skipped") then "passing"
+             else "pending" end),
+        mergeable: (.mergeable | ascii_downcase)
+      }'
+      ;;
+    gitlab)
+      out=$(glab mr view "$branch" -F json 2>/dev/null) || {
+        echo '{"forge":"gitlab","state":"none"}'; exit 0; }
+      printf '%s' "$out" | jq -c '{
+        forge: "gitlab",
+        state: (.state | if . == "opened" then "open" elif . == "merged" then "merged" else "closed" end),
+        url: .web_url, head_sha: .sha,
+        ci: ((.head_pipeline.status // .pipeline.status // "") |
+             if . == "" then "none" elif . == "success" then "passing"
+             elif (. == "failed" or . == "canceled") then "failing" else "pending" end),
+        mergeable: (.detailed_merge_status // .merge_status // "unknown")
+      }'
+      ;;
+  esac
+  ;;
+
+merge)
+  require_forge
+  branch=${1:-}; shift || true
+  [ -n "$branch" ] || die "merge needs a branch"
+  sha="" method=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --sha) sha=$2; shift 2 ;;
+      --method) method=$2; shift 2 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  [ -n "$sha" ] || die "merge needs --sha <reviewed head commit>; fixer never merges an unpinned head"
+  case $forge in
+    github)
+      if [ -z "$method" ]; then
+        allowed=$(gh repo view --json squashMergeAllowed,mergeCommitAllowed,rebaseMergeAllowed 2>/dev/null || echo '{}')
+        method=$(printf '%s' "$allowed" | jq -r 'if .squashMergeAllowed then "squash" elif .mergeCommitAllowed then "merge" elif .rebaseMergeAllowed then "rebase" else "merge" end')
+      fi
+      gh pr merge "$branch" --match-head-commit "$sha" "--$method"
+      ;;
+    gitlab)
+      # glab defaults --auto-merge to true, which would schedule the merge for
+      # later instead of merging now. Always turn it off.
+      set -- --sha "$sha" --auto-merge=false --yes
+      case $method in
+        squash) set -- "$@" --squash ;;
+        rebase) set -- "$@" --rebase ;;
+        merge|"") ;;
+        *) die "unknown merge method: $method" ;;
+      esac
+      glab mr merge "$branch" "$@"
+      ;;
+  esac
+  ;;
+
+url)
+  require_forge
+  branch=${1:-$(current_branch)}
+  case $forge in
+    github) gh pr view "$branch" --json url -q .url ;;
+    gitlab) glab mr view "$branch" -F json 2>/dev/null | jq -r .web_url ;;
+  esac
+  ;;
+
+*)
+  sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+  exit 2
+  ;;
+esac

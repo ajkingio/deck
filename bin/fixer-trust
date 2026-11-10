@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# fixer-trust: have the client trust a folder once, so agents never stop at a
+# folder-trust dialog there.
+#
+#   fixer-trust <project> [--harness claude|codex|grok]   trust a registered project
+#   fixer-trust --path <dir> [--harness <h>]              trust any folder (e.g. fixer itself)
+#   add --check to report only and change nothing
+#
+# Claude, Codex and Grok all key folder trust on the repository's main checkout,
+# so trusting a project once covers every runner worktree made from it.
+# fixer never answers the dialog and never edits the harness's config: it opens
+# the agent in that folder and the client answers the dialog themselves.
+#   - inside Herdr: in a focused workspace labelled trust-<name>, closed afterwards
+#   - outside Herdr (./setup): in this terminal; the client quits the agent after
+. "$(dirname "$0")/fixer-lib.sh"
+
+name="" path="" harness="" check=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --path) path=$2; shift 2 ;;
+    --harness) harness=$2; shift 2 ;;
+    --check) check=1; shift ;;
+    -*) die "unknown option: $1" ;;
+    *) name=$1; shift ;;
+  esac
+done
+if [ -n "$path" ]; then
+  [ -d "$path" ] || die "no such folder: $path"
+  path=$(cd "$path" && pwd -P)
+  [ -n "$name" ] || name=$(basename "$path" | tr 'A-Z_.' 'a-z--')
+else
+  require_project "$name"
+  path=$(project_get "$name" path)
+fi
+[ -n "$harness" ] || harness=$(default_harness)
+valid_harness "$harness" || die "unsupported harness: $harness"
+
+if harness_trusts "$harness" "$path"; then echo "$name is trusted by $harness"; exit 0; fi
+if [ $check = 1 ]; then
+  if [ -f "$(project_conf "$name")" ]; then hint="bin/fixer-trust $name --harness $harness"; else hint="bin/fixer-trust --path $path --harness $harness"; fi
+  echo "$name is NOT trusted by $harness (run: $hint)"; exit 1
+fi
+command -v "$harness" >/dev/null 2>&1 || die "$harness is not installed"
+
+quit_hint() {
+  case $harness in
+    claude) echo "type /exit" ;;
+    codex) echo "type /quit" ;;
+    grok) echo "type /exit" ;;
+  esac
+}
+
+# Outside Herdr: run the agent right here in the foreground.
+if [ "${HERDR_ENV:-}" != 1 ]; then
+  echo
+  echo "  $harness will open in $path and ask whether you trust this folder."
+  echo "  Choose the option that trusts it, then quit $harness ($(quit_hint))."
+  echo
+  printf '  Press Enter to open %s... ' "$harness"
+  read -r _ </dev/tty
+  (cd "$path" && "$harness") </dev/tty >/dev/tty 2>&1
+  if harness_trusts "$harness" "$path"; then echo "$name is trusted by $harness"; exit 0; fi
+  echo "$name is still not trusted by $harness"; exit 1
+fi
+
+# Inside Herdr: a focused workspace of its own.
+need herdr; need jq
+label="trust-$name"
+agent=$(printf 'trust-%s' "$name" | cut -c1-32)
+out=$(herdr workspace create --cwd "$path" --label "$label" --focus 2>&1) || die "herdr workspace create failed: $out"
+ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id')
+pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id')
+
+close_ws() {
+  local l
+  l=$(herdr workspace list 2>/dev/null | jq -r --arg w "$ws" '.result.workspaces[] | select(.workspace_id == $w) | .label' 2>/dev/null)
+  [ "$l" = "$label" ] && herdr workspace close "$ws" >/dev/null 2>&1
+}
+
+# The new shell may still be starting; retry until its prompt is up.
+tries=0 code=""
+while :; do
+  out=$(herdr agent start "$agent" --kind "$harness" --pane "$pane" --timeout 20000 2>&1) && { close_ws; echo "$name is trusted by $harness"; exit 0; }
+  code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
+  [ "$code" = agent_pane_busy ] && [ $tries -lt 30 ] && { tries=$((tries + 1)); sleep 1; continue; }
+  break
+done
+[ "$code" = agent_not_ready ] || { close_ws; die "could not start $harness: $out"; }
+
+echo "ACTION FOR THE CLIENT: switch to the Herdr workspace '$label' and answer $harness's trust dialog for $path."
+echo "waiting up to 5 minutes..."
+
+# An agent that becomes ready means they trusted it; one that disappears means they declined.
+i=0
+while [ $i -lt 300 ]; do
+  st=$(herdr agent get "$agent" 2>/dev/null | jq -r '.result.agent.agent_status // empty' 2>/dev/null)
+  case $st in
+    idle|"done") herdr agent send-keys "$agent" ctrl+c >/dev/null 2>&1; sleep 1
+                 herdr agent send-keys "$agent" ctrl+c >/dev/null 2>&1; sleep 1
+                 close_ws; echo "$name is trusted by $harness"; exit 0 ;;
+    "") close_ws; echo "$name was not trusted ($harness exited: the client declined)"; exit 1 ;;
+  esac
+  sleep 1; i=$((i + 1))
+done
+echo "still waiting on the trust dialog in workspace '$label'; run bin/fixer-trust $name --check later"
+exit 1
