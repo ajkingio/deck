@@ -181,14 +181,19 @@ A mod at `.claude/mods/fixer-lowkey`, auto-loaded through `.agents/skills/fixer-
 | --- | --- |
 | `ui.render` ToolUse / ToolResult / ToolGroup | drawn as nothing (passes through when `isExpanded`, i.e. ctrl+o) |
 | `ui.render` UserMessage | the watcher's task-notification row (its description starts `fixer-wait:`) drawn as nothing |
-| `ui.render` Spinner | the hex stream (`hooks/hexstream.ts`, a pure function of width and frame) |
-| `ui.render` AbovePrompt | `▌MERCS` band from `data/jobs/*/job.conf`, refined by `herdr agent list` (a merc at a dialog shows `DIALOG`) |
+| `ui.render` Spinner | the `▌MERCS` row (when any merc is live) above the hex stream (`hooks/hexstream.ts`, a pure function of width and frame) |
+| `ui.render` AbovePrompt | between turns (`!isWorking`): the `▌MERCS` row from `data/jobs/*/job.conf`, refined by `herdr agent list` (a merc at a dialog shows `DIALOG`), and under it, while a merc is working and the band isn't collapsed, the hex stream in a dimmer teal sized to `bodyColumns`. During a turn it draws nothing: the Spinner carries the row |
+| `turn.step` + `ui.render` AssistantMessage | short mid-turn narration drawn as nothing (`hooks/narration.ts`) |
 | `$.session.append` system notice | one dim note per new `status.log` line; display-only, the model never reads it |
 | `/lowkey` | toggles `lowkey=` in `config/fixer.conf`, confirms with a toast |
 
-Polls job files every 3s; the animation timer runs only during a turn. Seen status-log counts are kept in `$.store` so a restart doesn't replay old events. Assistant narration is not hidden: the API gives no reliable way to tell a mid-turn note from the final reply, and the contract already tells the Fixer not to narrate.
+Polls job files every 3s. The status items always sit above the animation: in a turn the Spinner draws the MERCS row and then the stream, and the band stays empty so the row never shows twice; between turns the band draws the row and then the stream. (The engine draws the Spinner above the band, so the row moves into the Spinner rather than the band drawing above it.) Merc reports are transcript notices, so they're above both already.
 
-Verified: `claude plugin validate`, `tsc` against the 2.1.322 types, and `claude plugin test` (5 tests). Not yet seen live in a session.
+A merc is *working* when its job status is `starting`/`running` and Herdr doesn't see its pane `blocked`, `idle` or `done`; without Herdr the job status alone decides. Blocked, dialog, review/reported and failed mercs stay in the band but don't animate it. The 120ms frame timer runs while lowkey is on and a turn is running or a merc is working, and stops otherwise. It is re-checked on turn start/complete/abort, after each poll (so it stops at most 3s after the last merc reports), and on `/lowkey`. The frame counter is never reset, so the stream resumes where it stopped. Seen status-log counts are kept in `$.store` so a restart doesn't replay old events.
+
+Narration hiding follows firstmate's Calm. A `turn.step` hook watches each main-agent step's text blocks without changing the stream. Text from a step that stopped for tools (`stopReason` `tool_use`, or `max_tokens` with tool calls) is a working note unless it has a newline or is 240+ characters trimmed. Matching `AssistantMessage` rows draw as nothing. Text that was ever a final reply stays visible, and a restored transcript is classified the same way at session start from `$.session.messages()`. It is display-only: the model's context is unchanged. The 2.1.322 `AssistantMessage` props carry no `isExpanded`, so the hook passes when one is sent, but ctrl+o may not reveal hidden notes on this build. A note can show briefly while it streams, before its step ends and the redraw hides it.
+
+Verified: `claude plugin validate`, `tsc` against the 2.1.322 types, and `claude plugin test` (18 tests). Not yet seen live in a session.
 
 ## Open questions
 
