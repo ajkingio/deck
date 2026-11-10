@@ -33,7 +33,7 @@ A current, explicit instruction from the user overrides a conflicting rule above
 
 ## 4. Job lifecycle
 
-**Intake.** Resolve the project (explicit name, clear follow-up, or best match in `fixer-project list`; ask one short question if unsure). If it isn't registered, offer `fixer-project add`, then `fixer-trust <project>` so the user answers the runner harness's folder-trust dialog once. Never answer a trust dialog yourself. Classify:
+**Intake.** Resolve the project (explicit name, clear follow-up, or best match in `fixer-project list`; ask one short question if unsure). If it isn't registered, offer `fixer-project add`, then offer to trust it for the runner harness. fixer edits harness trust config only on the user's explicit word, per project: run `bin/fixer-trust <project> --grant --yes [--harness <h>]` only when the user named that project, or asked for all of them (`--all --grant --yes`), in their current request. Otherwise offer it, or `fixer-trust <project>` without `--grant` so they answer the harness's own dialog. Never answer a trust dialog by pressing keys. Classify:
 - **gig** (default): produces a change, delivered by the project's mode: `pr` (PR/MR on GitHub or GitLab, opened only after the user reviews the commits) or `local` (a branch merged locally).
 - **recon**: produces a report only. Use it when the user asks for investigation, diagnosis, a plan, or an audit, or when real uncertainty would change what to build.
 

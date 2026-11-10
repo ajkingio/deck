@@ -112,7 +112,12 @@ Runners work unattended, so they launch with autonomy turned on, inside their ow
 - **Codex:** `--sandbox workspace-write --ask-for-approval never` with network access, and Codex hooks turned off for runners.
 - **Grok:** `--always-approve`.
 
-**Folder trust.** Each harness asks once whether you trust a repository, and a runner can't answer that. When you register a project, `bin/fixer-trust <project>` opens your runner's agent in it, in a Herdr workspace named `trust-<project>`, and you answer the dialog yourself. All three harnesses key trust on the main checkout, so that one answer covers every runner worktree. fixer never edits your harness config to skip the dialog.
+**Folder trust.** Each harness asks once whether you trust a repository, and a runner can't answer that. All three harnesses key trust on the main checkout, so trusting a project once covers every runner worktree. Two ways to do it:
+
+- `bin/fixer-trust <project> --grant` writes the harness's own trust record for that project (Claude and Codex; it backs the file up first and never overrides a decision already recorded there). It asks "Trust <project> (<path>) for <harness>? [y/N]" for each one; `--all` walks every registered project that isn't trusted yet. To run it yourself from Claude Code, use `! bin/fixer-trust <project> --grant --yes`.
+- `bin/fixer-trust <project>` opens your runner's agent in it, in a Herdr workspace named `trust-<project>`, and you answer the dialog yourself.
+
+fixer edits your harness's trust config only on your explicit word, per project: setup asks, or you name the project to the Fixer. It never presses keys on a trust dialog.
 
 **Fewer prompts for the Fixer (Claude Code).** Onboarding offers `! bin/fixer-allow`, which you run yourself. It lets the Fixer run its routine scripts without asking, by writing the gitignored `.claude/settings.local.json`. Merging, teardown, cloning and trust always still ask. `bin/fixer-allow --remove` undoes it.
 

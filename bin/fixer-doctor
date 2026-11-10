@@ -63,7 +63,7 @@ if [ -d "$FIXER_PROJECTS" ]; then
     esac
     th=$(default_harness)
     if "$FIXER_BIN/fixer-trust" "$n" --harness "$th" --check >/dev/null 2>&1; then ok "project $n: trusted by $th"
-    else wn "project $n: not trusted by $th yet; runners can't start there (bin/fixer-trust $n)"; fi
+    else wn "project $n: not trusted by $th yet; runners can't start there (bin/fixer-trust $n --grant --harness $th)"; fi
   done
 fi
 
