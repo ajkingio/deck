@@ -13,8 +13,10 @@ declare module 'claude-code' {
     'fixer-lowkey': {
       /** Whether lowkey is on (config/fixer.conf: on unless lowkey=off). */
       lowkey: boolean
-      /** Animation frame counter; advances while a turn runs with lowkey on. */
+      /** Animation frame counter; advances with lowkey on while a turn runs or a merc is working. */
       frame: number
+      /** Whether any merc is working: job status starting/running, and Herdr does not see its pane blocked, idle or done. */
+      working: boolean
       /** Live mercs for the band. */
       crew: Shaped<CrewEntry[]>
     }
