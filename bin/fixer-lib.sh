@@ -103,7 +103,13 @@ harness_trusts() { # <harness> <path>
       [ -f "$f" ] && awk -v p="[projects.\"$p\"]" '$0 == p { s = 1; next } /^\[/ { s = 0 } s && /trust_level *= *"trusted"/ { found = 1 } END { exit !found }' "$f" ;;
     grok)
       f="${GROK_HOME:-$HOME/.grok}/trusted_folders.toml"
-      [ -f "$f" ] && grep -qF "\"$p\"" "$f" ;;
+      # Its format isn't documented: accept only an exact quoted-path key
+      # ("<path>" = ...) or a table header whose last key is that path.
+      [ -f "$f" ] && awk -v k="\"$p\"" '
+        { l = $0; sub(/^[ \t]+/, "", l); sub(/[ \t]+$/, "", l) }
+        substr(l, 1, length(k)) == k && substr(l, length(k) + 1) ~ /^[ \t]*=/ { found = 1 }
+        l ~ /^\[/ && (l == "[" k "]" || l == "[[" k "]]" || substr(l, length(l) - length(k) - 1) == "." k "]") { found = 1 }
+        END { exit !found }' "$f" ;;
     *) return 1 ;;
   esac
 }

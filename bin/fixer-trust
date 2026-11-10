@@ -42,6 +42,9 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$harness" ] || harness=$(default_harness)
 valid_harness "$harness" || die "unsupported harness: $harness"
+# What to suggest for an untrusted project: the grant where fixer can write it.
+fix_flag=--grant
+[ "$harness" = grok ] && fix_flag=""
 [ $check = 1 ] && [ $grant = 1 ] && die "--check and --grant don't mix"
 [ $yes = 1 ] && [ $grant = 0 ] && die "--yes only goes with --grant"
 if [ $all = 1 ]; then
@@ -193,7 +196,7 @@ if [ $all = 1 ]; then
     n=$(conf_get "$f" name) p=$(conf_get "$f" path)
     harness_trusts "$harness" "$p" && continue
     any=1
-    if [ $check = 1 ]; then echo "$n is NOT trusted by $harness (run: bin/fixer-trust $n --grant --harness $harness)"; rc=1
+    if [ $check = 1 ]; then echo "$n is NOT trusted by $harness (run: bin/fixer-trust $n ${fix_flag:+$fix_flag }--harness $harness)"; rc=1
     elif [ $grant = 1 ]; then grant_one "$n" "$p" || rc=1
     else "$0" "$n" --harness "$harness" || rc=1; fi
   done
@@ -223,7 +226,7 @@ fi
 
 if harness_trusts "$harness" "$path"; then echo "$name is trusted by $harness"; exit 0; fi
 if [ $check = 1 ]; then
-  if [ "$(project_at "$path" || true)" = "$name" ]; then hint="bin/fixer-trust $name --grant --harness $harness"; else hint="bin/fixer-trust --path $path --harness $harness"; fi
+  if [ "$(project_at "$path" || true)" = "$name" ]; then hint="bin/fixer-trust $name ${fix_flag:+$fix_flag }--harness $harness"; else hint="bin/fixer-trust --path $path --harness $harness"; fi
   echo "$name is NOT trusted by $harness (run: $hint)"; exit 1
 fi
 command -v "$harness" >/dev/null 2>&1 || die "$harness is not installed"
