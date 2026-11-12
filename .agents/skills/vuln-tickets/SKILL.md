@@ -15,11 +15,11 @@ Set aside tickets that are not FOSSA dependency findings, are already in Securit
 
 ## 2. Group by repo
 
-One repo = one gig. Register any missing repo with `bin/fixer-project add` (reuse a clean local clone if one exists; set `--forge` from the host). Check trust with `bin/fixer-trust <p> --check`; grant only on the user's word.
+One repo = one gig. Register any missing repo with `bin/deck-project add` (reuse a clean local clone if one exists; set `--forge` from the host). Check trust with `bin/deck-trust <p> --check`; grant only on the user's word.
 
 ## 3. Brief each gig
 
-All of a repo's tickets in one branch. The brief gives a table of ticket, package, current, fix version, severity, due date, and manifest, and asks the runner to:
+All of a repo's tickets in one branch. The brief gives a table of ticket, package, current, fix version, severity, due date, and manifest, and asks the worker to:
 
 - check `main` first (scans go stale) and record the version resolved today; skip a ticket only if it is already fixed;
 - npm: upgrade the direct parent that pulls the package in, refresh the lockfile with the repo's npm, use `overrides` only as a last resort, flag major bumps and engine changes, verify with `npm ls` and `npm audit` before and after;
@@ -31,15 +31,15 @@ Spawn the gigs in parallel; they touch different repos.
 
 ## 4. Review and open
 
-On each `done`, read the report and the diff against `origin/main`. Show the user one summary table: repo, tickets, change, anything to know (major bumps, engine changes, overlapping Dependabot PRs). On their word, `bin/fixer-open` each job, then comment on every ticket with `ghost jira comment <key> "<text>"`: the PR/MR link, old → new version, how verified. Ghost uses Jira wiki syntax (`{{code}}`), not Markdown.
+On each `done`, read the report and the diff against `origin/main`. Show the user one summary table: repo, tickets, change, anything to know (major bumps, engine changes, overlapping Dependabot PRs). On their word, `bin/deck-open` each job, then comment on every ticket with `ghost jira comment <key> "<text>"`: the PR/MR link, old → new version, how verified. Ghost uses Jira wiki syntax (`{{code}}`), not Markdown.
 
 ## 5. Close
 
-When the PRs/MRs are merged (`bin/fixer-forge -C <worktree> status`) and the user says close:
+When the PRs/MRs are merged (`bin/deck-forge -C <worktree> status`) and the user says close:
 
 ```
 ghost jira batch-close <key> <key> ... --vex-status resolved --vex-justification upgraded_to_safe_version --dry-run
 ghost jira batch-close <key> <key> ... --vex-status resolved --vex-justification upgraded_to_safe_version --continue-on-error
 ```
 
-Pass keys as separate arguments (the Bash tool is zsh; an unquoted `$VAR` won't split). Re-run the user's JQL to confirm, then `bin/fixer-teardown` each job.
+Pass keys as separate arguments (the Bash tool is zsh; an unquoted `$VAR` won't split). Re-run the user's JQL to confirm, then `bin/deck-teardown` each job.

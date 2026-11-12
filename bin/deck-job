@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# deck-job: create and inspect jobs on the job board.
+#
+#   deck-job new <id> --project <name> --kind gig|recon [--title "<text>"] [--harness claude|codex|grok]
+#   deck-job list [--all]
+#   deck-job show <id>
+#   deck-job get <id> <key>
+#   deck-job set <id> <key> <value>
+#
+# `new` creates data/jobs/<id>/ with job.conf (status=queued) and a brief.md
+# rendered from templates/. The operator then fills the DECK:FILL sections.
+#
+# Statuses: queued, starting, running, blocked, review, reported, landed,
+#           failed, closed, cancelled.
+. "$(dirname "$0")/deck-lib.sh"
+
+include_engrams() { # <project>
+  local f scope aud
+  [ -d "$DECK_DATA/engrams" ] || return 0
+  for f in "$DECK_DATA/engrams"/*.md; do
+    [ -f "$f" ] || continue
+    aud=$(fm_get "$f" audience); scope=$(fm_get "$f" scope)
+    # runner: the audience name from before the rename
+    case $aud in worker|runner|both) ;; *) continue ;; esac
+    [ "$scope" = global ] || [ "$scope" = "$1" ] || continue
+    printf -- '- %s\n' "$(fm_body "$f" | sed '/^[[:space:]]*$/d' | tr '\n' ' ')"
+  done
+}
+
+cmd=${1:-}; shift || true
+case $cmd in
+new)
+  id=${1:-}; shift || true
+  valid_id "$id" || die "invalid job id '$id': use lowercase letters, digits and dashes, start with a letter, max 32 chars"
+  [ -e "$(job_dir "$id")" ] && die "job $id already exists"
+  project="" kind="" title="" harness=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --project) project=$2; shift 2 ;;
+      --kind) kind=$2; shift 2 ;;
+      --title) title=$2; shift 2 ;;
+      --harness) harness=$2; shift 2 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  require_project "$project"
+  case $kind in gig|recon) ;; *) die "--kind must be gig or recon" ;; esac
+  [ -n "$harness" ] || harness=$(default_harness)
+  valid_harness "$harness" || die "unsupported harness '$harness' (supported: $DECK_HARNESSES)"
+
+  dir=$(job_dir "$id")
+  mode=$(project_get "$project" mode pr)
+  [ "$kind" = recon ] && mode=report
+  mkdir -p "$dir"
+  : >"$dir/status.log"
+  c="$dir/job.conf"
+  conf_set "$c" id "$id"
+  conf_set "$c" project "$project"
+  conf_set "$c" kind "$kind"
+  conf_set "$c" title "${title:-$id}"
+  conf_set "$c" harness "$harness"
+  conf_set "$c" mode "$mode"
+  conf_set "$c" base "$(project_get "$project" base main)"
+  conf_set "$c" branch "deck/$id"
+  conf_set "$c" worktree "$(worktree_root)/$id"
+  conf_set "$c" status queued
+  conf_set "$c" seen_lines 0
+  conf_set "$c" created "$(now)"
+
+  engrams=$(include_engrams "$project")
+  addendum=""
+  if [ -f "$DECK_ROOT/learned/brief-addendum.md" ]; then
+    addendum=$(fm_body "$DECK_ROOT/learned/brief-addendum.md" | grep -v '^<!--' | sed '/^[[:space:]]*$/d')
+  fi
+  T_ID=$id T_PROJECT=$project T_TITLE="${title:-$id}" T_MODE=$mode \
+  T_BASE=$(job_get "$id" base) T_BRANCH=$(job_get "$id" branch) T_WORKTREE=$(job_get "$id" worktree) \
+  T_JOBDIR=$dir T_BIN=$DECK_BIN \
+  T_ENGRAMS="${engrams:-- (none yet)}" T_ADDENDUM="${addendum:-- (none yet)}" \
+    render_template "$DECK_ROOT/templates/$kind-brief.md" >"$dir/brief.md"
+
+  # Keep only the delivery section that applies to this job.
+  awk -v m="$mode" '
+    BEGIN { keep = 1 }
+    /^<!-- DELIVERY:/ { split($0, a, /[: ]+/); keep = (a[3] == m); next }
+    /^<!-- \/DELIVERY -->/ { keep = 1; next }
+    keep { print }
+  ' "$dir/brief.md" >"$dir/brief.md.tmp" && mv "$dir/brief.md.tmp" "$dir/brief.md"
+
+  echo "created job $id ($kind on $project, harness $harness)"
+  echo "brief: $dir/brief.md  <- fill the DECK:FILL sections, then run: bin/deck-spawn $id"
+  ;;
+list)
+  all=${1:-}
+  printf '%-24s %-10s %-6s %-16s %-7s %s\n' ID STATUS KIND PROJECT HARNESS TITLE
+  job_ids | while read -r id; do
+    s=$(job_get "$id" status)
+    if [ "$all" != --all ]; then case $s in closed|cancelled) continue ;; esac; fi
+    printf '%-24s %-10s %-6s %-16s %-7s %s\n' "$id" "$s" "$(job_get "$id" kind)" "$(job_get "$id" project)" "$(job_get "$id" harness)" "$(job_get "$id" title)"
+  done
+  ;;
+show)
+  require_job "${1:-}"
+  cat "$(job_conf "$1")"
+  echo "--- status.log"
+  cat "$(job_dir "$1")/status.log"
+  ;;
+get)
+  require_job "${1:-}"; job_get "$1" "${2:?key}"
+  ;;
+set)
+  require_job "${1:-}"; job_set "$1" "${2:?key}" "${3?value}"
+  ;;
+*)
+  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+  exit 2
+  ;;
+esac

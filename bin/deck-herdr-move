@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""deck-herdr-move: move one Herdr workspace to a new position in the sidebar.
+
+  deck-herdr-move <workspace_id> <insert_index>
+
+Herdr's workspace.move is API-only (no CLI subcommand), so this sends that one
+request over the socket in $HERDR_SOCKET_PATH and prints the server's JSON
+reply. It sends nothing else. Used by deck-spawn to group worker workspaces
+right after the operator's own.
+
+Wire protocol (Herdr 0.9.5, `herdr api schema --json`, WorkspaceMoveParams):
+  request:  {"id":..., "method":"workspace.move",
+             "params":{"workspace_id":W, "insert_index":N}}\\n
+  response: {"id":..., "result":{"type":"workspace_list","workspaces":[...]}}\\n
+
+Exit status: 0 moved; 1 usage or socket missing; 2 could not talk to the
+server; 3 the server returned an error or an unexpected reply.
+"""
+
+import json
+import os
+import socket
+import sys
+import time
+
+TIMEOUT = 5.0
+REQUEST_ID = "deck-workspace-move"
+
+
+def fail(code, msg):
+    sys.stderr.write("deck-herdr-move: %s\n" % msg)
+    return code
+
+
+def main(argv):
+    if len(argv) != 3:
+        sys.stderr.write(__doc__.split("\n\n")[0] + "\n\n  deck-herdr-move <workspace_id> <insert_index>\n")
+        return 1
+    ws, raw = argv[1], argv[2]
+    if not ws or any(c.isspace() for c in ws):
+        return fail(1, "bad workspace id: %r" % ws)
+    if not raw.isdigit():
+        return fail(1, "insert_index must be a non-negative integer: %r" % raw)
+    path = os.environ.get("HERDR_SOCKET_PATH", "")
+    if not path.startswith("/"):
+        return fail(1, "HERDR_SOCKET_PATH is not set; run this inside Herdr")
+
+    req = {"id": REQUEST_ID, "method": "workspace.move",
+           "params": {"workspace_id": ws, "insert_index": int(raw)}}
+    buf = b""
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(TIMEOUT)
+        s.connect(path)
+        s.sendall((json.dumps(req, separators=(",", ":")) + "\n").encode())
+        deadline = time.monotonic() + TIMEOUT
+        while b"\n" not in buf:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return fail(2, "timed out waiting for Herdr")
+            s.settimeout(left)
+            chunk = s.recv(65536)
+            if not chunk:
+                break
+            buf += chunk
+            if len(buf) > 4 * 1024 * 1024:
+                return fail(2, "reply too large")
+        s.close()
+    except OSError as e:
+        return fail(2, "socket error: %s" % e)
+
+    try:
+        resp = json.loads(buf.split(b"\n", 1)[0].decode("utf-8", "replace"))
+    except ValueError:
+        return fail(3, "unreadable reply: %r" % buf[:200])
+    result = resp.get("result") if isinstance(resp, dict) else None
+    if (not isinstance(resp, dict) or resp.get("id") != REQUEST_ID or resp.get("error")
+            or not isinstance(result, dict) or result.get("type") != "workspace_list"):
+        return fail(3, "unexpected reply: %s" % json.dumps(resp)[:300])
+    sys.stdout.write(json.dumps(resp, separators=(",", ":")) + "\n")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv))
+    except (BrokenPipeError, KeyboardInterrupt):
+        sys.exit(2)

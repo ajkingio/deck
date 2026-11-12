@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# fixer setup: run once after cloning your fork, in a normal terminal.
+# deck setup: run once after cloning your fork, in a normal terminal.
 #
 #   ./setup
 #
 # Safe to run again: your current answers become the defaults. Every change to
 # anything outside this folder (your shell rc file, Herdr agent hooks, logins)
 # is asked about first.
-. "$(dirname "$0")/bin/fixer-lib.sh"
+. "$(dirname "$0")/bin/deck-lib.sh"
+[ "$DECK_CONF" != "$DECK_LEGACY_CONF" ] ||
+  die "this clone still has config/fixer.conf from before the rename to deck; run bin/deck-migrate first, then ./setup again"
 
 B=$'\033[1m' D=$'\033[2m' C=$'\033[36m' M=$'\033[35m' G=$'\033[32m' Y=$'\033[33m' R=$'\033[31m' X=$'\033[0m'
 [ -t 1 ] || { B="" D="" C="" M="" G="" Y="" R="" X=""; }
@@ -40,9 +42,9 @@ choose() { # <question> <default> <option>... -> chosen option
   done
 }
 
-cur() { conf_get "$FIXER_CONF" "$1" "${2:-}"; }
+cur() { conf_get "$DECK_CONF" "$1" "${2:-}"; }
 
-printf '%s\n' "${C}" '   ┌─┐┬─┐ ┬┌─┐┬─┐' '   ├┤ │┌┴┬┘├┤ ├┬┘' '   └  ┴┴ └─└─┘┴└─' "${X}${D}   setup · $FIXER_ROOT${X}"
+printf '%s\n' "${C}" '   ┌┬┐┌─┐┌─┐┬┌─' '    ││├┤ │  ├┴┐' '   ─┴┘└─┘└─┘┴ ┴' "${X}${D}   setup · $DECK_ROOT${X}"
 
 if [ "${HERDR_ENV:-}" = 1 ]; then
   warn_ "You're running this inside Herdr. That works, but the launcher is meant to start Herdr for you."
@@ -61,7 +63,7 @@ else
   bad "herdr is missing: install it from https://herdr.dev"; missing=1
 fi
 harnesses=""
-for h in $FIXER_HARNESSES; do command -v "$h" >/dev/null 2>&1 && harnesses="$harnesses $h"; done
+for h in $DECK_HARNESSES; do command -v "$h" >/dev/null 2>&1 && harnesses="$harnesses $h"; done
 harnesses=${harnesses# }
 if [ -n "$harnesses" ]; then ok "agents: $harnesses"; else bad "no supported agent found: install Claude Code, Codex or Grok"; missing=1; fi
 for t in gh glab; do
@@ -76,7 +78,7 @@ fi
 for t in git jq herdr; do command -v $t >/dev/null 2>&1 || die "install $t, then run ./setup again"; done
 [ -n "$harnesses" ] || die "install an agent (claude, codex or grok), then run ./setup again"
 if [ -z "$(git config user.name)" ] || [ -z "$(git config user.email)" ]; then
-  warn_ "git user.name / user.email aren't set; runners need them to commit"
+  warn_ "git user.name / user.email aren't set; workers need them to commit"
   n=$(ask "Your name for git commits:" "")
   e=$(ask "Your email for git commits:" "")
   [ -n "$n" ] && git config --global user.name "$n"
@@ -85,37 +87,37 @@ fi
 
 # ------------------------------------------------------------------- you
 step "You"
-client=$(ask "What should the Fixer call you?" "$(cur client_name client)")
+user=$(ask "What should the Deck call you?" "$(cur client_name netrunner)")
 
 # ----------------------------------------------------------------- harness
 step "Agents"
 first=${harnesses%% *}
 # (No `case` inside $( ): macOS's bash 3.2 misparses the `)` of its patterns.)
-if [ "${harnesses#*claude}" != "$harnesses" ]; then fallback_fh=claude; else fallback_fh=$first; fi
-default_fh=$(cur fixer_harness "$fallback_fh")
+if [ "${harnesses#*claude}" != "$harnesses" ]; then fallback_dh=claude; else fallback_dh=$first; fi
+default_dh=$(cur deck_harness "$fallback_dh")
 # shellcheck disable=SC2086
-fixer_h=$(choose "Which agent is the Fixer (the one you talk to)?" "$default_fh" $harnesses)
+deck_h=$(choose "Which agent is the Deck (the one you talk to)?" "$default_dh" $harnesses)
 # shellcheck disable=SC2086
-runner_h=$(choose "Which agent should runners use by default?" "$(cur runner_harness "$fixer_h")" $harnesses)
+worker_h=$(choose "Which agent should workers use by default?" "$(cur worker_harness "$deck_h")" $harnesses)
 mode=$(choose "Default delivery for new projects: pr (open a PR/MR) or local (merge branches locally)?" "$(cur default_mode pr)" pr local)
 
-mkdir -p "$(dirname "$FIXER_CONF")"
-conf_set "$FIXER_CONF" client_name "$client"
-conf_set "$FIXER_CONF" fixer_harness "$fixer_h"
-conf_set "$FIXER_CONF" runner_harness "$runner_h"
-conf_set "$FIXER_CONF" default_mode "$mode"
-conf_set "$FIXER_CONF" claude_permission_mode "$(cur claude_permission_mode auto)"
-conf_set "$FIXER_CONF" notify "$(cur notify on)"
-conf_set "$FIXER_CONF" lowkey "$(cur lowkey on)"
-conf_set "$FIXER_CONF" herdr_session "$(cur herdr_session fixer)"
-[ -n "$(cur onboarded)" ] || conf_set "$FIXER_CONF" onboarded no
-ok "saved config/fixer.conf"
+mkdir -p "$(dirname "$DECK_CONF")"
+conf_set "$DECK_CONF" client_name "$user"
+conf_set "$DECK_CONF" deck_harness "$deck_h"
+conf_set "$DECK_CONF" worker_harness "$worker_h"
+conf_set "$DECK_CONF" default_mode "$mode"
+conf_set "$DECK_CONF" claude_permission_mode "$(cur claude_permission_mode auto)"
+conf_set "$DECK_CONF" notify "$(cur notify on)"
+conf_set "$DECK_CONF" ghost "$(cur ghost on)"
+conf_set "$DECK_CONF" herdr_session "$(cur herdr_session deck)"
+[ -n "$(cur onboarded)" ] || conf_set "$DECK_CONF" onboarded no
+ok "saved config/deck.conf"
 
 # ------------------------------------------------------- herdr agent hooks
 step "Herdr agent hooks"
-note "These let Herdr see exactly when an agent is working, idle, or waiting on you. fixer's watcher relies on that."
+note "These let Herdr see exactly when an agent is working, idle, or waiting on you. deck's watcher relies on that."
 status=$(herdr integration status 2>/dev/null || true)
-for h in $(printf '%s\n%s\n' "$fixer_h" "$runner_h" | sort -u); do
+for h in $(printf '%s\n%s\n' "$deck_h" "$worker_h" | sort -u); do
   line=$(printf '%s\n' "$status" | grep -E "^$h:" | head -n1)
   case $line in
     *current*) ok "$h: installed" ;;
@@ -143,103 +145,105 @@ command -v gh >/dev/null 2>&1 || command -v glab >/dev/null 2>&1 || note "neithe
 
 # --------------------------------------------------------- upstream remote
 step "Staying up to date"
-if git -C "$FIXER_ROOT" remote get-url upstream >/dev/null 2>&1; then
-  ok "upstream: $(git -C "$FIXER_ROOT" remote get-url upstream)"
+if git -C "$DECK_ROOT" remote get-url upstream >/dev/null 2>&1; then
+  ok "upstream: $(git -C "$DECK_ROOT" remote get-url upstream)"
 else
   guess=""
   if command -v gh >/dev/null 2>&1; then
-    guess=$(cd "$FIXER_ROOT" && gh repo view --json parent -q '.parent | select(. != null) | "https://github.com/\(.owner.login)/\(.name)"' 2>/dev/null || true)
+    guess=$(cd "$DECK_ROOT" && gh repo view --json parent -q '.parent | select(. != null) | "https://github.com/\(.owner.login)/\(.name)"' 2>/dev/null || true)
   fi
-  note "Your fork is 'origin'. Adding the original repo as 'upstream' lets you pull fixer updates."
+  note "Your fork is 'origin'. Adding the original repo as 'upstream' lets you pull deck updates."
   while :; do
     url=$(ask "Upstream repo URL (blank to skip):" "$guess")
     case $url in
       "") note "skipped"; break ;;
-      *://*|*@*:*|/*|./*|../*) git -C "$FIXER_ROOT" remote add upstream "$url" && ok "added upstream: $url"; break ;;
-      *) printf '  %sthat doesn'"'"'t look like a git URL (e.g. https://github.com/<owner>/fixer)%s\n' "$Y" "$X" >/dev/tty ;;
+      *://*|*@*:*|/*|./*|../*) git -C "$DECK_ROOT" remote add upstream "$url" && ok "added upstream: $url"; break ;;
+      *) printf '  %sthat doesn'"'"'t look like a git URL (e.g. https://github.com/<owner>/deck)%s\n' "$Y" "$X" >/dev/tty ;;
     esac
   done
 fi
 
 # ------------------------------------------------------------ fewer prompts
-if [ "$fixer_h" = claude ]; then
+if [ "$deck_h" = claude ]; then
   step "Fewer permission prompts"
-  note "Lets the Fixer run its routine scripts without asking each time (this clone only)."
-  note "Merging, teardown, cloning and trust always still ask. Undo with: bin/fixer-allow --remove"
-  if confirm "Allow fixer's routine scripts?" Y; then "$FIXER_BIN/fixer-allow" | head -n1 | sed 's/^/  /'; fi
+  note "Lets the Deck run its routine scripts without asking each time (this clone only)."
+  note "Merging, teardown, cloning and trust always still ask. Undo with: bin/deck-allow --remove"
+  if confirm "Allow deck's routine scripts?" Y; then "$DECK_BIN/deck-allow" | head -n1 | sed 's/^/  /'; fi
 fi
 
-# ------------------------------------------------------------- fixer itself
-# Changes to fixer's own code are gigs like any other, so fixer is a project.
-if [ ! -f "$(project_conf fixer)" ]; then
-  "$FIXER_BIN/fixer-project" add "$FIXER_ROOT" --name fixer --mode local >/dev/null &&
-    ok "registered fixer itself as a project (local mode): changes to fixer go through a runner too"
+# ------------------------------------------------------------- deck itself
+# Changes to deck's own code are gigs like any other, so deck is a project.
+if [ -f "$(project_conf fixer)" ]; then
+  note "deck is registered under its old project name, fixer; bin/deck-migrate renames it"
+elif [ ! -f "$(project_conf deck)" ]; then
+  "$DECK_BIN/deck-project" add "$DECK_ROOT" --name deck --mode local >/dev/null &&
+    ok "registered deck itself as a project (local mode): changes to deck go through a worker too"
 fi
 
 # ------------------------------------------------------------------- trust
 step "Folder trust"
-note "Each agent asks once whether you trust a repository, and runners can't answer that."
-note "Trust is per repository, so one answer covers every runner worktree of a project."
+note "Each agent asks once whether you trust a repository, and workers can't answer that."
+note "Trust is per repository, so one answer covers every worker worktree of a project."
 note "Saying yes writes that agent's own trust record for the project (backed up first)."
 
-# Grant on the client's yes; if fixer can't write it, offer the agent's own dialog.
-trust_now() { # <label> <harness> <fixer-trust target args...>
+# Grant on the user's yes; if deck can't write it, offer the agent's own dialog.
+trust_now() { # <label> <harness> <deck-trust target args...>
   local label=$1 h=$2 out; shift 2
   confirm "Trust $label for $h now?" Y || return 0
-  if out=$("$FIXER_BIN/fixer-trust" "$@" --grant --yes --harness "$h" 2>&1); then
+  if out=$("$DECK_BIN/deck-trust" "$@" --grant --yes --harness "$h" 2>&1); then
     printf '%s\n' "$out" | sed 's/^/  /'; return 0
   fi
-  printf '%s\n' "$out" | sed 's/^fixer: //; s/^/  /'
+  printf '%s\n' "$out" | sed 's/^deck: //; s/^/  /'
   if confirm "Open $h there so you can answer its trust dialog yourself instead?" Y; then
-    "$FIXER_BIN/fixer-trust" "$@" --harness "$h" | sed 's/^/  /'
+    "$DECK_BIN/deck-trust" "$@" --harness "$h" | sed 's/^/  /'
   fi
 }
 
-if harness_trusts "$fixer_h" "$FIXER_ROOT"; then
-  ok "$fixer_h trusts the fixer folder"
+if harness_trusts "$deck_h" "$DECK_ROOT"; then
+  ok "$deck_h trusts the deck folder"
 else
-  trust_now "the fixer folder" "$fixer_h" --path "$FIXER_ROOT"
+  trust_now "the deck folder" "$deck_h" --path "$DECK_ROOT"
 fi
 
-if [ -n "$(ls "$FIXER_PROJECTS" 2>/dev/null)" ]; then
-  for f in "$FIXER_PROJECTS"/*.conf; do
+if [ -n "$(ls "$DECK_PROJECTS" 2>/dev/null)" ]; then
+  for f in "$DECK_PROJECTS"/*.conf; do
     p=$(conf_get "$f" name)
-    if harness_trusts "$runner_h" "$(conf_get "$f" path)"; then ok "$runner_h trusts project $p"
-    else trust_now "project $p" "$runner_h" "$p"; fi
+    if harness_trusts "$worker_h" "$(conf_get "$f" path)"; then ok "$worker_h trusts project $p"
+    else trust_now "project $p" "$worker_h" "$p"; fi
   done
 fi
-while confirm "Register a project now? (you can also just ask the Fixer later)" N; do
+while confirm "Register a project now? (you can also just ask the Deck later)" N; do
   src=$(ask "Git URL or local path:" "")
   [ -n "$src" ] || continue
-  out=$("$FIXER_BIN/fixer-project" add "$src" 2>&1) || { bad "$out"; continue; }
+  out=$("$DECK_BIN/deck-project" add "$src" 2>&1) || { bad "$out"; continue; }
   ok "$out"
   p=$(printf '%s' "$out" | sed -E 's/^registered ([^:]+):.*/\1/')
-  trust_now "$p" "$runner_h" "$p"
+  trust_now "$p" "$worker_h" "$p"
 done
 
 # ---------------------------------------------------------------- launcher
 step "Launcher"
-alias_name=$FIXER_ALIAS
-greeting=$FIXER_GREETING
-note "'$alias_name' opens the Herdr session '$(cur herdr_session fixer)' in this folder and starts $fixer_h with \"$greeting\"."
+alias_name=$DECK_ALIAS
+greeting=$DECK_GREETING
+note "'$alias_name' opens the Herdr session '$(cur herdr_session deck)' in this folder and starts $deck_h with \"$greeting\"."
 note "If that session already exists, it asks whether to open it or start a new one."
 installed=0
-rc=$("$FIXER_BIN/fixer-launcher" show 2>/dev/null | sed -n 's/^rc file: *//p')
-if "$FIXER_BIN/fixer-launcher" status 2>/dev/null; then
+rc=$("$DECK_BIN/deck-launcher" show 2>/dev/null | sed -n 's/^rc file: *//p')
+if "$DECK_BIN/deck-launcher" status 2>/dev/null; then
   ok "the '$alias_name' alias is already in ${rc:-your shell config}"
   installed=2
 else
-  conflicts=$("$FIXER_BIN/fixer-launcher" conflicts 2>/dev/null)
+  conflicts=$("$DECK_BIN/deck-launcher" conflicts 2>/dev/null)
   if [ -n "$conflicts" ]; then
     warn_ "'$alias_name' is already defined outside this clone's block:"
     printf '%s\n' "$conflicts" | sed 's/^/      /'
     note "Adding it here makes this clone's alias win in new shells; remove the other one to avoid confusion."
   fi
   if confirm "Add the '$alias_name' alias to your shell config?" Y; then
-    "$FIXER_BIN/fixer-launcher" install | sed 's/^/  /'
+    "$DECK_BIN/deck-launcher" install | sed 's/^/  /'
     installed=1
   else
-    note "skipped; you can always run: $FIXER_BIN/fixer-launch"
+    note "skipped; you can always run: $DECK_BIN/deck-launch"
   fi
 fi
 
@@ -249,11 +253,11 @@ if [ $installed = 1 ]; then
   note "This terminal started before the alias existed, so it doesn't know '$alias_name' yet."
   if confirm "Start a fresh shell here so '$alias_name' works now?" Y; then
     printf '  Type %s%s%s.\n\n' "$C$B" "$alias_name" "$X"
-    cd "$FIXER_ROOT" && exec "${SHELL:-/bin/zsh}" -i
+    cd "$DECK_ROOT" && exec "${SHELL:-/bin/zsh}" -i
   fi
   printf '  Open a new terminal (or run: source your shell rc file) and type %s%s%s.\n\n' "$C$B" "$alias_name" "$X"
 elif [ $installed = 2 ]; then
   printf '  Type %s%s%s to start.\n\n' "$C$B" "$alias_name" "$X"
 else
-  printf '  Run %s%s%s to start.\n\n' "$C$B" "$FIXER_BIN/fixer-launch" "$X"
+  printf '  Run %s%s%s to start.\n\n' "$C$B" "$DECK_BIN/deck-launch" "$X"
 fi

@@ -1,0 +1,354 @@
+#!/usr/bin/env bash
+# deck-migrate: move a clone set up before the rename from fixer to deck.
+# The USER runs this in a normal terminal, not the operator.
+#
+#   bin/deck-migrate              each step is printed, then asked y/N
+#   bin/deck-migrate --dry-run    print every step and change nothing
+#   bin/deck-migrate --old-path <dir>   where the clone lived before, if its
+#                                 folder was moved and wasn't named fixer
+#
+# Safe to run again: a step that is already done says so and asks nothing.
+# Run it once from the old folder, move the folder with the mv it prints, then
+# run it again from the new folder to repoint what names the path.
+#
+# Steps: config/fixer.conf -> config/deck.conf (and its old keys); state files;
+# ~/.fixer/worktrees -> ~/.deck/worktrees (refused while worktrees are live);
+# the project record fixer -> deck (and jobs that name it); the Claude Code
+# allow rules; the holocall alias -> jackin; folder trust for the new path;
+# Claude Code's project memory folder; the repo folder (prints the mv); the
+# GitHub rename (prints the commands, runs nothing).
+. "$(dirname "$0")/deck-lib.sh"
+
+dry=0 old_path=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --dry-run) dry=1; shift ;;
+    --old-path) old_path=${2:-}; shift 2 ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown option: $1 (see: bin/deck-migrate --help)" ;;
+  esac
+done
+need jq
+
+ROOT=$DECK_ROOT
+if [ "$(basename "$ROOT")" = fixer ]; then
+  OLD_ROOT=$ROOT
+  NEW_ROOT="$(dirname "$ROOT")/deck"
+  moved=0
+else
+  NEW_ROOT=$ROOT
+  OLD_ROOT=${old_path:-"$(dirname "$ROOT")/fixer"}
+  [ "$OLD_ROOT" != "$ROOT" ] || OLD_ROOT=""
+  moved=1
+fi
+
+n=0 pending=0
+step() { n=$((n + 1)); printf '\n== %s. %s\n' "$n" "$*"; }
+say() { printf '   %s\n' "$*"; }
+skip() { say "nothing to do: $*"; }
+
+# Ask before a change. Dry run: say what would happen and answer no.
+ok_to() { # <question>
+  local r
+  if [ $dry = 1 ]; then say "(dry run: not asking \"$1\")"; pending=$((pending + 1)); return 1; fi
+  printf '   %s [y/N] ' "$1"
+  read -r r || r=""
+  case $r in y|Y|yes|Yes) return 0 ;; esac
+  say "skipped"; pending=$((pending + 1)); return 1
+}
+
+# Claude Code names a project's folder after its path, every other character a dash.
+slug() { printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g'; }
+
+# Old config key -> new key, applied only where the new key isn't set yet.
+rename_keys() { # <file>  prints the new contents
+  awk '
+    BEGIN { map["lowkey"] = "ghost"; map["fixer_harness"] = "deck_harness"; map["runner_harness"] = "worker_harness" }
+    { line[NR] = $0; i = index($0, "="); key[NR] = i ? substr($0, 1, i - 1) : ""; if (key[NR] != "") have[key[NR]] = 1 }
+    END {
+      for (r = 1; r <= NR; r++) {
+        k = key[r]; l = line[r]
+        if (k in map) { if (map[k] in have) continue; l = map[k] substr(l, length(k) + 1) }
+        if (k == "herdr_session" && l == "herdr_session=fixer") l = "herdr_session=deck"
+        print l
+      }
+    }' "$1"
+}
+
+conf_needs_keys() { # <file>
+  [ "$(rename_keys "$1")" != "$(cat "$1")" ]
+}
+
+show_diff() { # <old-file> <new-text>
+  printf '%s\n' "$2" | diff "$1" - | sed -n 's/^\([<>]\)/\1/p' | sed 's/^</   - /; s/^>/   + /'
+}
+
+echo "deck-migrate: $ROOT"
+[ $dry = 1 ] && echo "dry run: nothing will be changed"
+[ "${HERDR_ENV:-}" = 1 ] && warn "you're inside Herdr; this is meant for a normal terminal, with the Deck not running"
+
+# ------------------------------------------------------------------ 1. config
+step "Config: config/fixer.conf -> config/deck.conf"
+c_old="$ROOT/config/fixer.conf" c_new="$ROOT/config/deck.conf"
+if [ -f "$c_old" ] && [ -f "$c_new" ]; then
+  say "refusing: both config/fixer.conf and config/deck.conf exist. deck reads config/deck.conf;"
+  say "compare the two, keep what you want in config/deck.conf, and delete config/fixer.conf."
+  pending=$((pending + 1))
+elif [ -f "$c_old" ]; then
+  new=$(rename_keys "$c_old")
+  say "rename config/fixer.conf to config/deck.conf"
+  if [ "$new" != "$(cat "$c_old")" ]; then say "and rename its old keys:"; show_diff "$c_old" "$new"; fi
+  case $new in *herdr_session=deck*)
+    [ "$(conf_get "$c_old" herdr_session)" = fixer ] &&
+      say "(the next jackin opens a Herdr session named deck; an old 'fixer' session stays until you stop it)" ;;
+  esac
+  if ok_to "Rename the config?"; then
+    tmp=$(mktemp "$c_new.XXXXXX")
+    printf '%s\n' "$new" >"$tmp" && mv "$tmp" "$c_new" && rm -f "$c_old" && say "done: config/deck.conf"
+  fi
+elif [ -f "$c_new" ] && conf_needs_keys "$c_new"; then
+  new=$(rename_keys "$c_new")
+  say "config/deck.conf still has old keys:"; show_diff "$c_new" "$new"
+  if ok_to "Rename them?"; then
+    tmp=$(mktemp "$c_new.XXXXXX"); printf '%s\n' "$new" >"$tmp" && mv "$tmp" "$c_new" && say "done"
+  fi
+elif [ -f "$c_new" ]; then
+  skip "config/deck.conf is in place"
+else
+  skip "this clone has no config yet (run ./setup)"
+fi
+
+# ------------------------------------------------------------------ 2. state
+step "State: state/last-debrief -> state/last-defrag"
+if [ -f "$ROOT/state/last-debrief" ] && [ ! -f "$ROOT/state/last-defrag" ]; then
+  say "rename state/last-debrief (when /debrief, now /defrag, last ran)"
+  if ok_to "Rename it?"; then mv "$ROOT/state/last-debrief" "$ROOT/state/last-defrag" && say "done"; fi
+else
+  skip "no state/last-debrief to rename"
+fi
+
+# ------------------------------------------------------------------ 3. worktrees
+step "Worktrees: ~/.fixer/worktrees -> ~/.deck/worktrees"
+w_old="$HOME/.fixer/worktrees" w_new="$HOME/.deck/worktrees"
+if [ ! -d "$w_old" ]; then
+  skip "$w_old doesn't exist"
+else
+  live=$(find "$w_old" -mindepth 2 -maxdepth 3 -name .git 2>/dev/null | sed 's#/\.git$##' | sort)
+  if [ -n "$live" ]; then
+    say "refusing: these worktrees under $w_old are still live:"
+    printf '%s\n' "$live" | sed 's/^/     /'
+    say "git links each one to its repository by path, so moving them would break them."
+    say "Land or discard those jobs and tear them down (bin/deck-teardown <id>), then run this again."
+    pending=$((pending + 1))
+  elif [ -d "$w_new" ] && [ -n "$(ls -A "$w_new" 2>/dev/null)" ]; then
+    say "refusing: $w_new already has files in it; move what you need from $w_old by hand"
+    pending=$((pending + 1))
+  else
+    say "no live worktrees there; move $w_old to $w_new"
+    if ok_to "Move it?"; then
+      mkdir -p "$HOME/.deck"
+      [ -d "$w_new" ] && rmdir "$w_new"
+      mv "$w_old" "$w_new" && say "done"
+      rmdir "$HOME/.fixer" 2>/dev/null && say "removed the now-empty ~/.fixer"
+    fi
+  fi
+fi
+
+# ------------------------------------------------------------------ 4. project record
+step "Project record: data/projects/fixer.conf -> deck.conf"
+p_old="$ROOT/data/projects/fixer.conf" p_new="$ROOT/data/projects/deck.conf"
+jobs_named_fixer() {
+  local f
+  for f in "$ROOT"/data/jobs/*/job.conf; do
+    [ -f "$f" ] && [ "$(conf_get "$f" project)" = fixer ] && printf '%s\n' "$f"
+  done
+}
+jobs=$(jobs_named_fixer)
+if [ -f "$p_old" ] && [ -f "$p_new" ]; then
+  say "refusing: both data/projects/fixer.conf and deck.conf exist; keep one and delete the other"
+  pending=$((pending + 1))
+elif [ -f "$p_old" ] || [ -n "$jobs" ] || { [ -f "$p_new" ] && [ "$(conf_get "$p_new" path)" != "$ROOT" ]; }; then
+  if [ -f "$p_old" ]; then
+    say "rename the project record fixer to deck: name=deck, path=$ROOT"
+    [ "$(conf_get "$p_old" path)" = "$ROOT" ] || say "(its path was $(conf_get "$p_old" path))"
+  elif [ -f "$p_new" ] && [ "$(conf_get "$p_new" path)" != "$ROOT" ]; then
+    say "point the deck project record at this folder: path $(conf_get "$p_new" path) -> $ROOT"
+  fi
+  [ -n "$jobs" ] && say "and set project=deck in $(printf '%s\n' "$jobs" | wc -l | tr -d ' ') job record(s) that name project fixer"
+  if ok_to "Update the project record?"; then
+    if [ -f "$p_old" ]; then mv "$p_old" "$p_new"; fi
+    if [ -f "$p_new" ]; then conf_set "$p_new" name deck; conf_set "$p_new" path "$ROOT"; fi
+    printf '%s\n' "$jobs" | while read -r f; do [ -n "$f" ] && conf_set "$f" project deck; done
+    say "done"
+  fi
+elif [ -f "$p_new" ]; then
+  skip "the deck project record points at this folder"
+else
+  skip "deck isn't registered as a project (./setup registers it)"
+fi
+
+# ------------------------------------------------------------------ 5. allow rules
+step "Claude Code allow rules (.claude/settings.local.json)"
+s="$ROOT/.claude/settings.local.json"
+if [ -f "$s" ] && jq -e '[.permissions.allow[]? | select(type == "string" and contains("bin/fixer-"))] | length > 0' "$s" >/dev/null 2>&1; then
+  say "these rules name the old scripts:"
+  jq -r '.permissions.allow[] | select(type == "string" and contains("bin/fixer-"))' "$s" | sed 's/^/     /'
+  say "rewrite each one for bin/deck-*"
+  if ok_to "Rewrite them?"; then
+    tmp=$(mktemp "$s.XXXXXX")
+    jq '.permissions.allow |= (map(if type == "string" then sub("bin/fixer-"; "bin/deck-") else . end) | unique)' "$s" >"$tmp" &&
+      mv "$tmp" "$s" && say "done"
+  fi
+else
+  skip "no rules for bin/fixer-* scripts"
+fi
+
+# ------------------------------------------------------------------ 6. alias
+step "Launcher alias: holocall -> jackin"
+rc=$("$DECK_BIN/deck-launcher" show 2>/dev/null | sed -n 's/^rc file: *//p')
+shell_name=$(basename "${SHELL:-zsh}")
+hash_of() { printf '%s' "$1" | cksum | cut -d' ' -f1; }
+# Fenced blocks to take out: the old fixer block for this clone (old or current
+# path) and a deck block left at the old path by a run before the folder moved.
+tags="fixer ($ROOT)"
+if [ -n "$OLD_ROOT" ] && [ "$OLD_ROOT" != "$ROOT" ]; then tags="$tags
+fixer ($OLD_ROOT)
+deck ($OLD_ROOT)"; fi
+old_files=""
+if [ "$shell_name" = fish ] && [ -n "$rc" ]; then
+  d=$(dirname "$rc")
+  set -- "$d/fixer-$(hash_of "$ROOT").fish"
+  if [ -n "$OLD_ROOT" ] && [ "$OLD_ROOT" != "$ROOT" ]; then set -- "$@" "$d/fixer-$(hash_of "$OLD_ROOT").fish" "$d/deck-$(hash_of "$OLD_ROOT").fish"; fi
+  for f in "$@"; do
+    [ -f "$f" ] && [ "$f" != "$rc" ] && old_files="$old_files $f"
+  done
+fi
+# The rc file without those blocks.
+strip_tags() { # <file>
+  TAGS=$tags awk '
+    BEGIN { n = split(ENVIRON["TAGS"], t, "\n"); for (i = 1; i <= n; i++) { b["# >>> " t[i] " >>>"] = 1; e["# <<< " t[i] " <<<"] = 1 } }
+    $0 in b { skip = 1; next }
+    $0 in e { skip = 0; next }
+    !skip' "$1"
+}
+found="" loose=""
+if [ -n "$rc" ] && [ -f "$rc" ]; then
+  if [ "$shell_name" != fish ]; then
+    found=$(printf '%s\n' "$tags" | while IFS= read -r t; do
+      awk -v b="# >>> $t >>>" -v e="# <<< $t <<<" '$0 == b { p = 1 } p { print } $0 == e { p = 0 }' "$rc"
+    done)
+    loose=$(strip_tags "$rc" | grep 'holocall' || true)
+  else
+    loose=$(grep 'holocall' "$rc" || true)
+  fi
+fi
+if [ -z "$rc" ]; then
+  skip "unsupported shell; replace holocall with jackin in your shell config yourself"
+elif [ -z "$found" ] && [ -z "$old_files" ]; then
+  if [ -n "$loose" ]; then
+    say "holocall appears in $rc outside any block deck manages; edit it yourself:"
+    printf '%s\n' "$loose" | sed 's/^/     /'
+    pending=$((pending + 1))
+  else
+    skip "no holocall alias for this clone in $rc"
+  fi
+else
+  say "in $rc, replace:"
+  [ -n "$found" ] && printf '%s\n' "$found" | sed 's/^/     /'
+  for f in $old_files; do say "  the file $f:"; sed 's/^/     /' "$f"; done
+  say "with:"
+  printf '     alias %s=%s\n' "$DECK_ALIAS" "'$ROOT/bin/deck-launch'"
+  [ $moved = 0 ] && say "(it points at this folder; after you move the folder, run this again to repoint it)"
+  [ -n "$loose" ] && { say "holocall also appears outside those blocks; edit that yourself:"; printf '%s\n' "$loose" | sed 's/^/     /'; }
+  if ok_to "Replace the alias?"; then
+    if [ -n "$found" ]; then
+      tmp=$(mktemp "$rc.deck.XXXXXX")
+      strip_tags "$rc" >"$tmp"
+      cat "$tmp" >"$rc" && rm -f "$tmp"   # keep the rc file's own permissions and links
+    fi
+    for f in $old_files; do rm -f "$f"; done
+    "$DECK_BIN/deck-launcher" install | sed 's/^/   /'
+  fi
+fi
+
+# ------------------------------------------------------------------ 7. trust
+step "Folder trust for the new path (claude, codex)"
+if [ $moved = 0 ]; then
+  say "waits until the folder is moved: run this again from $NEW_ROOT"
+  pending=$((pending + 1))
+elif [ ! -f "$p_new" ] || [ "$(conf_get "$p_new" path)" != "$ROOT" ]; then
+  say "waits for step 4: deck-trust only grants a registered project's checkout"
+  pending=$((pending + 1))
+else
+  for h in claude codex; do
+    if ! command -v "$h" >/dev/null 2>&1; then say "$h: not installed, skipped"; continue; fi
+    if harness_trusts "$h" "$ROOT"; then say "$h: already trusts $ROOT"; continue; fi
+    say "$h: run bin/deck-trust --path $ROOT --grant --harness $h"
+    if ok_to "Trust $ROOT for $h?"; then
+      "$DECK_BIN/deck-trust" --path "$ROOT" --grant --yes --harness "$h" 2>&1 | sed 's/^/   /'
+    fi
+  done
+fi
+
+# ------------------------------------------------------------------ 8. memory
+step "Claude Code project memory"
+cdir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
+if [ -z "$OLD_ROOT" ]; then
+  skip "no old path to copy from (pass --old-path <dir> if the clone lived elsewhere)"
+else
+  m_old="$cdir/$(slug "$OLD_ROOT")" m_new="$cdir/$(slug "$NEW_ROOT")"
+  say "Claude Code keeps this folder's transcripts and memory in $cdir/<path with dashes>."
+  if [ ! -d "$m_old" ]; then
+    skip "no $m_old"
+  elif [ -d "$m_new" ]; then
+    skip "$m_new already exists (compare it with $m_old yourself if you need to)"
+  else
+    say "copy $m_old"
+    say "  to $m_new (the old folder stays)"
+    if ok_to "Copy it?"; then cp -Rp "$m_old" "$m_new" && say "done"; fi
+  fi
+fi
+
+# ------------------------------------------------------------------ 9. folder
+step "The repo folder"
+if [ $moved = 1 ]; then
+  skip "this clone is at $ROOT"
+elif [ -e "$NEW_ROOT" ]; then
+  say "can't suggest a move: $NEW_ROOT already exists. Pick another name and move the folder yourself,"
+  say "then run bin/deck-migrate --old-path $ROOT from there."
+  pending=$((pending + 1))
+else
+  say "this script can't move the folder it runs from. Quit any agent or Herdr session running in it, then run:"
+  echo
+  printf '     mv %q %q\n' "$OLD_ROOT" "$NEW_ROOT"
+  printf '     cd %q && bin/deck-migrate\n' "$NEW_ROOT"
+  echo
+  say "The second run repoints the project record and the alias, re-grants folder trust, and offers the memory copy."
+  wts=$(git -C "$ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' | grep -vxF "$ROOT" || true)
+  if [ -n "$wts" ]; then
+    say "These worktrees of this repo are still live; moving the folder breaks their link to it:"
+    printf '%s\n' "$wts" | sed 's/^/     /'
+    say "Finish and tear down those jobs first, or after the move run: git -C $NEW_ROOT worktree repair"
+  fi
+  pending=$((pending + 1))
+fi
+
+# ------------------------------------------------------------------ 10. GitHub
+step "GitHub fork name"
+origin=$(git -C "$ROOT" remote get-url origin 2>/dev/null || true)
+case $origin in
+  */fixer|*/fixer.git|*:fixer|*:fixer.git)
+    new_origin=$(printf '%s' "$origin" | sed -E 's#fixer(\.git)?$#deck\1#')
+    say "origin is $origin. To rename your fork too (this script runs neither):"
+    echo
+    printf '     (cd %q && gh repo rename deck)\n' "$ROOT"
+    printf '     git -C %q remote set-url origin %q\n' "$ROOT" "$new_origin"
+    echo
+    say "GitHub redirects the old URL, so this can wait." ;;
+  "") skip "no origin remote" ;;
+  *) skip "origin ($origin) isn't named fixer" ;;
+esac
+
+echo
+if [ $pending = 0 ]; then echo "deck-migrate: all done"
+else echo "deck-migrate: $pending step(s) still open; run bin/deck-migrate again when they're ready"; fi

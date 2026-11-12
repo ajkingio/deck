@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# deck-wait: block until something about the crew needs the operator's attention.
+#
+#   deck-wait                 wait until there is at least one event, print events, exit 0
+#   deck-wait --timeout <s>   give up after <s> seconds (exit 0, prints "no events")
+#   deck-wait --once          check once and exit (use at the start of a turn on Codex)
+#
+# Events, one per line:  <job-id> <event> <detail>
+#   done | blocked | failed   the worker reported via deck-report
+#   dialog                    Herdr sees the worker stuck at an approval/question UI
+#   idle                      the worker stopped without reporting
+#   gone                      the worker's agent is no longer running
+#   none                      no running jobs to watch (exits immediately)
+#
+# Only one watcher runs per deck home; a second exits 3 with "already watching".
+# Runs a Herdr notification for user-facing events unless config notify=off.
+. "$(dirname "$0")/deck-lib.sh"
+
+timeout=0 once=0 interval=${DECK_WAIT_INTERVAL:-5}
+while [ $# -gt 0 ]; do
+  case $1 in
+    --timeout) timeout=$2; shift 2 ;;
+    --once) once=1; shift ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+need jq
+
+mkdir -p "$DECK_STATE"
+lock="$DECK_STATE/wait.pid"
+if [ $once = 0 ]; then
+  if [ -f "$lock" ] && kill -0 "$(cat "$lock" 2>/dev/null)" 2>/dev/null; then
+    echo "already watching (pid $(cat "$lock"))"; exit 3
+  fi
+  echo $$ >"$lock"
+  trap 'rm -f "$lock"' EXIT
+fi
+
+notify() { # <title> <body> <sound>
+  [ "$(conf_get "$DECK_CONF" notify on)" = off ] && return 0
+  command -v herdr >/dev/null 2>&1 || return 0
+  herdr notification show "$1" --body "$2" --sound "$3" >/dev/null 2>&1 || true
+}
+
+scan() { # prints events; updates job records
+  local id s dir lines seen new ev rest info ast seq flag
+  for id in $(job_ids); do
+    s=$(job_get "$id" status)
+    case $s in running|blocked) ;; *) continue ;; esac
+    dir=$(job_dir "$id")
+
+    # 1. What the worker reported.
+    lines=$(wc -l <"$dir/status.log" | tr -d ' ')
+    seen=$(job_get "$id" seen_lines 0)
+    if [ "$lines" -gt "$seen" ]; then
+      new=$(tail -n "+$((seen + 1))" "$dir/status.log")
+      job_set "$id" seen_lines "$lines"
+      printf '%s\n' "$new" | while read -r _ ev rest; do
+        [ -n "$ev" ] || continue
+        printf '%s %s %s\n' "$id" "$ev" "$rest"
+        case $ev in
+          done) if [ "$(job_get "$id" kind)" = recon ]; then job_set "$id" status reported; else job_set "$id" status review; fi
+                notify "$id: done" "$rest" "done" ;;
+          blocked) job_set "$id" status blocked; notify "$id needs a decision" "$rest" request ;;
+          failed) job_set "$id" status failed; notify "$id failed" "$rest" request ;;
+        esac
+      done
+      s=$(job_get "$id" status)
+      case $s in running|blocked) ;; *) continue ;; esac
+    fi
+
+    # 2. What Herdr sees.
+    info=$(herdr agent get "$id" 2>/dev/null) || info=""
+    ast=$(printf '%s' "$info" | jq -r '.result.agent.agent_status // empty' 2>/dev/null)
+    seq=$(printf '%s' "$info" | jq -r '.result.agent.state_change_seq // 0' 2>/dev/null)
+    flag=$(job_get "$id" herdr_flag "")
+    if [ -z "$ast" ]; then
+      [ "$flag" = gone ] && continue
+      job_set "$id" herdr_flag gone
+      printf '%s gone worker agent is no longer running\n' "$id"
+      notify "$id: worker gone" "the worker exited without reporting" request
+    elif [ "$ast" = blocked ] && [ "$flag" != "blocked:$seq" ]; then
+      job_set "$id" herdr_flag "blocked:$seq"
+      printf '%s dialog worker is waiting at an approval or question dialog\n' "$id"
+      notify "$id needs approval" "worker is at a dialog" request
+    elif [ "$s" = running ] && { [ "$ast" = idle ] || [ "$ast" = "done" ]; } && [ "$flag" != "idle:$seq" ]; then
+      job_set "$id" herdr_flag "idle:$seq"
+      printf '%s idle worker stopped without reporting\n' "$id"
+    fi
+  done
+}
+
+active() {
+  local id
+  for id in $(job_ids); do
+    case $(job_get "$id" status) in running|blocked) return 0 ;; esac
+  done
+  return 1
+}
+
+start=$(date +%s)
+while :; do
+  events=$(scan)
+  if [ -n "$events" ]; then printf '%s\n' "$events"; exit 0; fi
+  if ! active; then echo "none no running jobs to watch"; exit 0; fi
+  [ $once = 1 ] && { echo "no events"; exit 0; }
+  if [ "$timeout" -gt 0 ] && [ $(( $(date +%s) - start )) -ge "$timeout" ]; then echo "no events"; exit 0; fi
+  sleep "$interval"
+done
