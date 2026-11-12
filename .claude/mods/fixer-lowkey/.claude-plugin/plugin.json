@@ -1,7 +1,0 @@
-{
-  "name": "fixer-lowkey",
-  "version": "0.1.0",
-  "description": "fixer /lowkey: hides tool-call clutter, animates the working row with a hex stream, shows the mercs above the prompt and notes when they report",
-  "types": "./types/index.d.ts",
-  "license": "MIT"
-}

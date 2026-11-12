@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# deck-report: how a worker reports to the operator. Workers call this; the operator doesn't.
+#
+#   deck-report <id> done "<PR/MR URL, or 'branch ready <sha>', or 'report written'>"
+#   deck-report <id> blocked "<the question you need answered>"
+#   deck-report <id> failed "<why you could not finish>"
+#
+# Appends one line to data/jobs/<id>/status.log, which wakes the operator's watcher.
+. "$(dirname "$0")/deck-lib.sh"
+
+id=${1:-}; event=${2:-}
+require_job "$id"
+shift 2
+case $event in
+  done|blocked|failed) ;;
+  *) die "event must be done, blocked or failed" ;;
+esac
+text=$(printf '%s' "$*" | tr '\n' ' ')
+[ -n "$text" ] || die "add a short message after the event"
+printf '%s %s %s\n' "$(now)" "$event" "$text" >>"$(job_dir "$id")/status.log"
+echo "reported to deck: $event"
+[ "$event" = blocked ] && echo "now stop and wait; the operator will answer in this session"
+exit 0

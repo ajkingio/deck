@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# deck-land: land a finished gig. Run ONLY on the user's explicit word.
+#
+#   deck-land <id> [--method squash|merge|rebase]
+#
+# pr mode:    merges the PR/MR, pinned to the head commit the forge reports now.
+#             Refuses if CI is failing or the PR/MR is not open.
+# local mode: merges branch deck/<id> into the project's base branch in the
+#             project checkout. Refuses if that checkout is dirty or not on base.
+. "$(dirname "$0")/deck-lib.sh"
+
+id=${1:-}; shift || true
+require_job "$id"
+method=""
+[ "${1:-}" = --method ] && method=${2:-}
+
+[ "$(job_get "$id" kind)" = gig ] || die "only gigs land; recon jobs end with a report"
+case $(job_get "$id" status) in review) ;; *) die "job $id is $(job_get "$id" status), not review" ;; esac
+
+mode=$(job_get "$id" mode)
+branch=$(job_get "$id" branch)
+base=$(job_get "$id" base)
+ppath=$(project_get "$(job_get "$id" project)" path)
+
+case $mode in
+pr)
+  st=$(project_forge "$(job_get "$id" project)" -C "$ppath" status "$branch") || die "could not read PR/MR status"
+  state=$(printf '%s' "$st" | jq -r .state)
+  ci=$(printf '%s' "$st" | jq -r .ci)
+  sha=$(printf '%s' "$st" | jq -r .head_sha)
+  url=$(printf '%s' "$st" | jq -r .url)
+  [ "$state" = merged ] && { job_set "$id" status landed; echo "already merged: $url"; exit 0; }
+  [ "$state" = none ] && die "no PR/MR open for $branch yet; it opens with bin/deck-open $id, on the user's word"
+  [ "$state" = open ] || die "PR/MR for $branch is $state"
+  [ "$ci" = failing ] && die "CI is failing on $url; not merging"
+  [ -n "$sha" ] && [ "$sha" != null ] || die "forge did not report a head commit"
+  if [ -n "$method" ]; then
+    project_forge "$(job_get "$id" project)" -C "$ppath" merge "$branch" --sha "$sha" --method "$method" || die "merge failed"
+  else
+    project_forge "$(job_get "$id" project)" -C "$ppath" merge "$branch" --sha "$sha" || die "merge failed"
+  fi
+  job_set "$id" landed_sha "$sha"
+  ;;
+local)
+  [ -z "$(git -C "$ppath" status --porcelain)" ] || die "project checkout $ppath has uncommitted changes; not merging"
+  cur=$(git -C "$ppath" symbolic-ref --quiet --short HEAD || true)
+  [ "$cur" = "$base" ] || die "project checkout is on '$cur', not '$base'; not merging"
+  sha=$(git -C "$ppath" rev-parse "$branch")
+  if ! git -C "$ppath" merge --no-edit --no-ff "$branch" >/dev/null 2>&1; then
+    git -C "$ppath" merge --abort 2>/dev/null || true
+    die "merge of $branch into $base conflicts; nothing changed. Ask the worker to rebase."
+  fi
+  job_set "$id" landed_sha "$sha"
+  ;;
+*) die "unknown mode: $mode" ;;
+esac
+
+job_set "$id" status landed
+job_set "$id" landed "$(now)"
+echo "landed $id ($mode)"
+echo "next: bin/deck-teardown $id"

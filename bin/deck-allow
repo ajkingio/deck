@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# deck-allow: let a Claude Code operator run deck's routine scripts without a
+# permission prompt each time. The USER runs this, not the operator:
+#
+#   ! bin/deck-allow            (in Claude Code, the ! prefix runs it as you)
+#   bin/deck-allow --remove     take the rules back out
+#
+# Writes .claude/settings.local.json, which is private to this clone and never
+# committed. Left out on purpose, so they always ask: deck-open (pushing and
+# opening PRs/MRs), deck-land (merging),
+# deck-teardown (it can discard work), deck-project add (it clones),
+# deck-trust (--grant writes the harness's trust config), and deck-allow
+# itself. Never add a rule here that matches deck-trust.
+. "$(dirname "$0")/deck-lib.sh"
+need jq
+
+f="$DECK_ROOT/.claude/settings.local.json"
+rules='[
+  "Bash(bin/deck-start)",
+  "Bash(bin/deck-doctor:*)",
+  "Bash(bin/deck-sitrep:*)",
+  "Bash(bin/deck-project list)",
+  "Bash(bin/deck-project show:*)",
+  "Bash(bin/deck-job:*)",
+  "Bash(bin/deck-spawn:*)",
+  "Bash(bin/deck-tell:*)",
+  "Bash(bin/deck-wait:*)",
+  "Bash(herdr agent get:*)",
+  "Bash(herdr agent list:*)",
+  "Bash(herdr agent read:*)",
+  "Bash(herdr workspace list:*)"
+]'
+
+mkdir -p "$(dirname "$f")"
+[ -s "$f" ] || echo '{}' >"$f"
+jq -e . "$f" >/dev/null 2>&1 || die "$f is not valid JSON; fix it by hand first"
+
+tmp=$(mktemp "$f.XXXXXX")
+if [ "${1:-}" = --remove ]; then
+  jq --argjson r "$rules" '.permissions.allow = ((.permissions.allow // []) - $r)' "$f" >"$tmp"
+  msg="removed deck's rules from"
+else
+  jq --argjson r "$rules" '.permissions.allow = (((.permissions.allow // []) + $r) | unique)' "$f" >"$tmp"
+  msg="added deck's rules to"
+fi
+mv "$tmp" "$f"
+echo "$msg $f"
+echo "Still asks every time: deck-open, deck-land, deck-teardown, deck-project add, deck-trust (including --grant)."
