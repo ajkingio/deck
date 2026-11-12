@@ -27,7 +27,7 @@ landed=0
 case $kind:$mode in
   recon:*) [ -s "$dir/report.md" ] && landed=1 ;;
   gig:pr)
-    st=$("$FIXER_BIN/fixer-forge" -C "$ppath" status "$branch" 2>/dev/null | jq -r .state 2>/dev/null)
+    st=$(project_forge "$(job_get "$id" project)" -C "$ppath" status "$branch" 2>/dev/null | jq -r .state 2>/dev/null)
     [ "$st" = merged ] && landed=1 ;;
   gig:local)
     git -C "$ppath" merge-base --is-ancestor "$branch" "$base" 2>/dev/null && landed=1 ;;

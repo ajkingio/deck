@@ -48,12 +48,17 @@ forge=$(detect) || forge=""
 cmd=${1:-}; shift || true
 
 require_forge() {
-  [ -n "$forge" ] || die "cannot tell whether $(git remote get-url origin 2>/dev/null || echo 'this repo') is GitHub or GitLab; set forge= in the project record or FIXER_FORGE"
+  [ -n "$forge" ] || die "cannot tell whether $(git remote get-url origin 2>/dev/null || echo 'this repo') is GitHub or GitLab; set FIXER_FORGE=github|gitlab"
+  local cli h
   case $forge in
-    github) need gh ;;
-    gitlab) need glab ;;
+    github) cli=gh ;;
+    gitlab) cli=glab ;;
     *) die "unsupported forge: $forge" ;;
   esac
+  h=$(remote_host) || die "cannot determine the remote host for $cli authentication"
+  command -v "$cli" >/dev/null 2>&1 || die "$cli is not installed for $h; install $cli, then run: $cli auth login --hostname $h"
+  "$cli" auth status --hostname "$h" >/dev/null 2>&1 ||
+    die "$cli is not authenticated for $h; run: $cli auth login --hostname $h"
 }
 
 current_branch() { git symbolic-ref --quiet --short HEAD || die "detached HEAD; pass a branch"; }
