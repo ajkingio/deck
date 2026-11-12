@@ -224,11 +224,23 @@ greeting=$FIXER_GREETING
 note "'$alias_name' opens the Herdr session '$(cur herdr_session fixer)' in this folder and starts $fixer_h with \"$greeting\"."
 note "If that session already exists, it asks whether to open it or start a new one."
 installed=0
-if confirm "Add the '$alias_name' alias to your shell config?" Y; then
-  "$FIXER_BIN/fixer-launcher" install | sed 's/^/  /'
-  installed=1
+rc=$("$FIXER_BIN/fixer-launcher" show 2>/dev/null | sed -n 's/^rc file: *//p')
+if "$FIXER_BIN/fixer-launcher" status 2>/dev/null; then
+  ok "the '$alias_name' alias is already in ${rc:-your shell config}"
+  installed=2
 else
-  note "skipped; you can always run: $FIXER_BIN/fixer-launch"
+  conflicts=$("$FIXER_BIN/fixer-launcher" conflicts 2>/dev/null)
+  if [ -n "$conflicts" ]; then
+    warn_ "'$alias_name' is already defined outside this clone's block:"
+    printf '%s\n' "$conflicts" | sed 's/^/      /'
+    note "Adding it here makes this clone's alias win in new shells; remove the other one to avoid confusion."
+  fi
+  if confirm "Add the '$alias_name' alias to your shell config?" Y; then
+    "$FIXER_BIN/fixer-launcher" install | sed 's/^/  /'
+    installed=1
+  else
+    note "skipped; you can always run: $FIXER_BIN/fixer-launch"
+  fi
 fi
 
 # -------------------------------------------------------------------- done
@@ -240,6 +252,8 @@ if [ $installed = 1 ]; then
     cd "$FIXER_ROOT" && exec "${SHELL:-/bin/zsh}" -i
   fi
   printf '  Open a new terminal (or run: source your shell rc file) and type %s%s%s.\n\n' "$C$B" "$alias_name" "$X"
+elif [ $installed = 2 ]; then
+  printf '  Type %s%s%s to start.\n\n' "$C$B" "$alias_name" "$X"
 else
   printf '  Run %s%s%s to start.\n\n' "$C$B" "$FIXER_BIN/fixer-launch" "$X"
 fi
