@@ -1,16 +1,16 @@
 ---
-name: debrief
-description: Review what fixer has learned and decide what to keep - proposals for the client profile, engrams, new skills, and brief improvements. Use when the user runs /debrief, asks what fixer has learned, or wants to review or prune memory.
+name: defrag
+description: Review what deck has learned and decide what to keep - proposals for the user profile, engrams, new skills, and brief improvements. Use when the user runs /defrag, asks what deck has learned, or wants to review or prune memory.
 ---
 
-# Debrief
+# Defrag
 
 The learning loop: gather signals, propose, and apply only what the user approves.
 
 ## 1. Gather
 
 - Pending items in `data/proposals.md`.
-- Since the last debrief (timestamp in `state/last-debrief`, or all time): the **Friction** and **Follow-ups** sections of each `data/jobs/*/report.md`, and the user's corrections in this conversation.
+- Since the last defrag (timestamp in `state/last-defrag`, or all time): the **Friction** and **Follow-ups** sections of each `data/jobs/*/report.md`, and the user's corrections in this conversation.
 - Repetition: three or more jobs with a similar title or brief suggest a skill.
 - Pruning: profile and engrams that contradict newer facts, refer to files or projects that no longer exist, or push the budget over (profile ≤ 300 words; engrams ≤ 40 files).
 
@@ -33,7 +33,7 @@ Kinds and where they land:
 | --- | --- | --- |
 | `profile` | `data/profile.md`: how the user likes to work | private |
 | `engram` | `data/engrams/<slug>.md`: a fact about a project or the user's setup | private |
-| `brief-patch` | `learned/brief-addendum.md`: a standing instruction for every runner | committed to fork |
+| `brief-patch` | `learned/brief-addendum.md`: a standing instruction for every worker | committed to fork |
 | `skill` | `.agents/skills/<name>/SKILL.md`: a reusable procedure | committed to fork |
 | `prune` | removes or rewrites an existing entry | as the target |
 
@@ -42,14 +42,14 @@ Engram file shape:
 ```
 ---
 scope: global | <project-name>
-audience: runner | fixer | both
+audience: worker | operator | both
 created: <YYYY-MM-DD>
 why: <one line>
 ---
 <the fact, one to three sentences>
 ```
 
-`audience: runner` engrams are pasted into every brief for that scope, so keep them short and useful to a stranger. `fixer` engrams are for you only (printed at session start).
+`audience: worker` engrams are pasted into every brief for that scope, so keep them short and useful to a stranger. `operator` engrams are for you only (printed at session start). Engrams written before the rename may say `runner` or `fixer` instead; they mean `worker` and `operator`.
 
 ## 3. Review with the user
 
@@ -63,4 +63,4 @@ A new skill should be small: a frontmatter `name` and a `description` that says 
 
 ## 4. Finish
 
-Write the current UTC time to `state/last-debrief`. Summarize in one line what was kept.
+Write the current UTC time to `state/last-defrag`. Summarize in one line what was kept.
