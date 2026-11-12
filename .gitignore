@@ -1,4 +1,4 @@
-# Private to each client's clone. Never committed.
+# Private to each user's clone. Never committed.
 /config/
 /data/
 /state/
