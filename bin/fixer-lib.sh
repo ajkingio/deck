@@ -62,6 +62,13 @@ job_ids() { # all job ids, oldest first
 
 project_conf() { printf '%s/%s.conf\n' "$FIXER_PROJECTS" "$1"; }
 project_get() { conf_get "$(project_conf "$1")" "$2" "${3:-}"; }
+# Pass the recorded forge without tying detection to job/worktree layout.
+# An explicit environment override (even empty) takes precedence.
+project_forge() { # <project> <fixer-forge arguments...>
+  local project=$1; shift
+  FIXER_FORGE="${FIXER_FORGE-$(project_get "$project" forge)}" "$FIXER_BIN/fixer-forge" "$@"
+}
+
 require_project() {
   [ -n "${1:-}" ] || die "missing --project"
   [ -f "$(project_conf "$1")" ] || die "no such project: $1 (see: bin/fixer-project list)"

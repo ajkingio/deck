@@ -96,11 +96,14 @@ Delivery modes per project: `pr` (runner commits; client reviews, says "open it"
 
 `bin/fixer-forge` is the single place that knows gh vs glab. Runners call it by absolute path (passed in the brief), so briefs are forge-agnostic.
 
-**Detection**, per project, in order:
-1. Explicit `forge=github|gitlab` in `data/projects.md`.
-2. Remote host `github.com` → github.
-3. Remote host `gitlab.com`, or any host `glab auth status` reports as authenticated → gitlab.
-4. Otherwise: ask the client once and record it.
+**Detection**, in order:
+1. Explicit `FIXER_FORGE=github|gitlab` environment override.
+2. The project's `forge=` in `data/projects/<name>.conf`, passed via `FIXER_FORGE` by job callers (`fixer-open`, `fixer-land`, `fixer-teardown`, and `fixer-sitrep --forge`).
+3. Remote host `github.com` → github, `gitlab.com` → gitlab.
+4. Otherwise, authenticated `glab auth status --hostname <host>` → gitlab, then authenticated `gh auth status --hostname <host>` → github.
+5. If still unknown, fail and request `FIXER_FORGE=github|gitlab`.
+
+Registration uses host detection when `--forge` is omitted. `detect` does not require authentication for a known forge. Other verbs check the selected CLI's authentication for the remote host before any push or forge operation; failures name the CLI, host, and login command.
 
 **Verbs:**
 

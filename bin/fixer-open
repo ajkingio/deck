@@ -26,7 +26,7 @@ base=$(job_get "$id" base)
 [ -z "$(git -C "$wt" status --porcelain)" ] || die "worktree $wt has uncommitted changes; ask the runner to commit or clean up"
 [ "$(git -C "$wt" rev-list --count "$base..$branch" 2>/dev/null || echo 0)" -gt 0 ] || die "$branch has no commits beyond $base"
 
-st=$("$FIXER_BIN/fixer-forge" -C "$wt" status "$branch") || die "could not read PR/MR status"
+st=$(project_forge "$(job_get "$id" project)" -C "$wt" status "$branch") || die "could not read PR/MR status"
 state=$(printf '%s' "$st" | jq -r .state)
 case $state in
 open)
@@ -38,7 +38,7 @@ none)
   [ -s "$dir/pr-title.txt" ] || die "missing $dir/pr-title.txt"
   [ -s "$dir/pr-body.md" ] || die "missing $dir/pr-body.md"
   title=$(head -n1 "$dir/pr-title.txt")
-  url=$(FIXER_JOB="" FIXER_OPEN_APPROVED=1 "$FIXER_BIN/fixer-forge" -C "$wt" open \
+  url=$(FIXER_JOB="" FIXER_OPEN_APPROVED=1 project_forge "$(job_get "$id" project)" -C "$wt" open \
     --title "$title" --body-file "$dir/pr-body.md" --base "$base") || die "could not open PR/MR"
   url=$(printf '%s\n' "$url" | grep -Eo 'https?://[^ ]+' | tail -n1)
   echo "opened $url"

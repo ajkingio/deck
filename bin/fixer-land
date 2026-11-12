@@ -24,7 +24,7 @@ ppath=$(project_get "$(job_get "$id" project)" path)
 
 case $mode in
 pr)
-  st=$("$FIXER_BIN/fixer-forge" -C "$ppath" status "$branch") || die "could not read PR/MR status"
+  st=$(project_forge "$(job_get "$id" project)" -C "$ppath" status "$branch") || die "could not read PR/MR status"
   state=$(printf '%s' "$st" | jq -r .state)
   ci=$(printf '%s' "$st" | jq -r .ci)
   sha=$(printf '%s' "$st" | jq -r .head_sha)
@@ -35,9 +35,9 @@ pr)
   [ "$ci" = failing ] && die "CI is failing on $url; not merging"
   [ -n "$sha" ] && [ "$sha" != null ] || die "forge did not report a head commit"
   if [ -n "$method" ]; then
-    "$FIXER_BIN/fixer-forge" -C "$ppath" merge "$branch" --sha "$sha" --method "$method" || die "merge failed"
+    project_forge "$(job_get "$id" project)" -C "$ppath" merge "$branch" --sha "$sha" --method "$method" || die "merge failed"
   else
-    "$FIXER_BIN/fixer-forge" -C "$ppath" merge "$branch" --sha "$sha" || die "merge failed"
+    project_forge "$(job_get "$id" project)" -C "$ppath" merge "$branch" --sha "$sha" || die "merge failed"
   fi
   job_set "$id" landed_sha "$sha"
   ;;
