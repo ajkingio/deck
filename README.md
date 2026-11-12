@@ -109,7 +109,7 @@ Nothing is saved without your yes, and rejected proposals aren't suggested again
 Runners work unattended, so they launch with autonomy turned on, inside their own worktree:
 
 - **Claude Code:** `--permission-mode auto` (set `claude_permission_mode` in `config/fixer.conf` to change it).
-- **Codex:** `--sandbox workspace-write --ask-for-approval never` with network access, and Codex hooks turned off for runners.
+- **Codex:** `--ask-for-approval never` with a workspace-write permissions profile that also lets it write the job folder and the worktree's git metadata, with network access, and Codex hooks turned off for runners.
 - **Grok:** `--always-approve`.
 
 **Folder trust.** Each harness asks once whether you trust a repository, and a runner can't answer that. All three harnesses key trust on the main checkout, so trusting a project once covers every runner worktree. Two ways to do it:

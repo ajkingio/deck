@@ -76,8 +76,17 @@ if ! herdr agent get "$id" >/dev/null 2>&1; then
       set -- --permission-mode "$(conf_get "$FIXER_CONF" claude_permission_mode auto)" \
         --add-dir "$dir" --append-system-prompt-file "$FIXER_ROOT/templates/runner-system.md" -n "$id" ;;
     codex)
-      set -- -s workspace-write -a never --add-dir "$dir" \
-        -c sandbox_workspace_write.network_access=true --disable hooks ;;
+      # A linked worktree's git dir (<common>/worktrees/<name>) and its objects
+      # and refs (<common>) live outside the worktree, and Codex keeps a
+      # worktree's gitdir read-only even when it is an extra writable root
+      # (--add-dir / writable_roots; seen on 0.167). Only a permissions profile
+      # naming those paths for write lets the runner commit and fetch. Codex
+      # ignores the profile if --sandbox or sandbox_mode is set anywhere.
+      tq() { printf '"%s"' "$(printf '%s' "$1" | sed 's/[\\"]/\\&/g')"; }
+      gcommon=$(git -C "$wt" rev-parse --path-format=absolute --git-common-dir) || die "not a git worktree: $wt"
+      gdir=$(git -C "$wt" rev-parse --path-format=absolute --git-dir) || die "not a git worktree: $wt"
+      set -- -a never --disable hooks -c 'default_permissions="fixer_runner"' \
+        -c "permissions.fixer_runner={extends=\":workspace\",network={enabled=true},filesystem={$(tq "$dir")=\"write\",$(tq "$gcommon")=\"write\",$(tq "$gdir")=\"write\"}}" ;;
     grok)
       set -- --always-approve ;;
   esac
