@@ -13,7 +13,7 @@ The plan for Pi and local models is in [`ROADMAP.md`](ROADMAP.md).
 ## Requirements
 
 - [Herdr](https://herdr.dev) 0.9 or newer
-- One of: [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), Grok (Pi can also be the Deck, but workers need one of these)
+- One of: [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), Grok, Pi
 - `git` and `jq`
 - For PRs: `gh` (GitHub) and/or `glab` (GitLab, including self-hosted), logged in
 
@@ -135,10 +135,11 @@ Workers run unattended, so they launch with autonomy turned on, inside their own
 - **Claude Code:** `--permission-mode auto` (set `claude_permission_mode` in `config/deck.conf` to change it).
 - **Codex:** `--ask-for-approval never` with a workspace-write permissions profile that also lets it write the job folder and the worktree's git metadata, with network access, and Codex hooks turned off for workers.
 - **Grok:** `--always-approve`.
+- **Pi:** never asks before a tool runs and has no sandbox, so a Pi worker can write anywhere you can. It starts with `--approve` for its worktree (see folder trust below). It uses Pi's default model unless `config/deck.conf` sets `pi_worker_model` (passed as `--model`, e.g. `anthropic/claude-sonnet-5-5`) and `pi_worker_thinking` (passed as `--thinking`: `off`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`).
 
-**Folder trust.** Each harness asks once whether you trust a repository, and a worker can't answer that. All three harnesses key trust on the main checkout, so trusting a project once covers every worker worktree. Two ways to do it:
+**Folder trust.** Each harness asks once whether you trust a repository, and a worker can't answer that. Claude Code, Codex and Grok key trust on the main checkout, so trusting a project once covers every worker worktree. Pi keys trust by path, so its trust doesn't reach worktrees; deck still trusts only the main checkout, and starts a Pi worker with `--approve` (trust for that run only, nothing written) when the checkout is trusted. Two ways to trust a project:
 
-- `bin/deck-trust <project> --grant` writes the harness's own trust record for that project (Claude and Codex; it backs the file up first and never overrides a decision already recorded there). It asks "Trust <project> (<path>) for <harness>? [y/N]" for each one; `--all` walks every registered project that isn't trusted yet. To run it yourself from Claude Code, use `! bin/deck-trust <project> --grant --yes`.
+- `bin/deck-trust <project> --grant` writes the harness's own trust record for that project (Claude, Codex and Pi; it backs the file up first and never overrides a decision already recorded there). It asks "Trust <project> (<path>) for <harness>? [y/N]" for each one; `--all` walks every registered project that isn't trusted yet. To run it yourself from Claude Code, use `! bin/deck-trust <project> --grant --yes`.
 - `bin/deck-trust <project>` opens your worker's agent in it, in a Herdr workspace named `trust-<project>`, and you answer the dialog yourself.
 
 deck edits your harness's trust config only on your explicit word, per project: setup asks, or you name the project to the Deck. It never presses keys on a trust dialog.

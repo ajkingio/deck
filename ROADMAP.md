@@ -19,23 +19,19 @@ Herdr stays the multiplexer until Rex is out of beta. Rex comes later, behind an
 | pr-mode teardown refuses commits made after a PR merged | `bin/deck-teardown`, `tests/teardown.test.sh` |
 | Relaunch and interrupt in place | `deck-spawn --relaunch`, `deck-tell --interrupt`, `gone` status |
 | Pi as the **operator** harness | `.pi/extensions/deck-operator.ts` (watcher, settle backstop, write guard); `deck_harness=pi`; Pi trust in `deck-trust`; `/scan` and `/defrag` prompts |
+| Pi as a **worker** harness | `pi` in `DECK_HARNESSES`; `deck-spawn` passes `--append-system-prompt templates/worker-system.md --name <id> --approve`, with `--approve` only when Pi trusts the project's main checkout (nothing written to `trust.json`); optional `pi_worker_model` and `pi_worker_thinking` in `config/deck.conf` (passed as `--model`/`--thinking`); `deck-tell --interrupt` sends `esc`; relaunch, setup and doctor support; `tests/pi.test.sh` |
 
 ## In progress
 
-**Pi as a worker harness.** Job `deck-pi-workers`, branch `deck/deck-pi-workers`, running on the MacBook. Scope:
-
-- `pi` in `DECK_HARNESSES`, with spawn args.
-- `--approve` only when the project's main checkout is trusted in `~/.pi/agent/trust.json`.
-- Optional config keys `pi_worker_model` and `pi_worker_thinking`.
-- Interrupt key and relaunch support.
-
-If that branch hasn't reached `main` when you read this, it is still open on the MacBook; don't redo it.
+Nothing.
 
 ## Next, in order
 
 ### 1. Local-model trial (recon)
 
 **Prerequisite:** Ollama on `tempo` reachable from the MacBook over Tailscale. On tempo, set `OLLAMA_HOST=0.0.0.0`; from the MacBook, check `curl http://tempo:11434/api/tags`. As of 2026-11-13 it did not answer.
+
+**Prerequisite:** a live check of Pi workers in Herdr, which the test suite only covers against a stub. Run `herdr integration install pi`, then one real Pi gig through `deck-spawn`, `deck-tell --interrupt` (Escape should stop a turn mid-tool) and `deck-spawn --relaunch`, confirming Herdr detects the worker's working, idle and done states.
 
 Steps:
 
@@ -84,6 +80,7 @@ Put every Herdr call in `deck-lib.sh` behind `mux_*` functions, then add a Rex a
 - Which models to standardise on (after the trial).
 - SearXNG or a hosted search API.
 - Whether to tighten the bash write guard: block any non-read-only bash command that mentions a protected path.
+- Whether Pi workers get a tool_call guard that blocks writes outside their worktree and job dir (Pi workers have no approvals or sandbox).
 - Which connectors are worth setting up in Pi.
 - When to move to Rex.
 

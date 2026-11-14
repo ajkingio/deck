@@ -36,23 +36,24 @@ installed=""
 for h in $DECK_OPERATOR_HARNESSES; do command -v "$h" >/dev/null 2>&1 && installed="$installed $h"; done
 if [ -n "$installed" ]; then ok "harnesses installed:$installed${me:+ (the operator is running in $me)}"; else fl "none of claude, codex, grok, pi is installed"; fi
 
-# Pi as the operator: deck's Pi extension loads only in a trusted folder, and
-# Herdr reads Pi's state exactly only with its Pi integration.
+# Pi as the operator: deck's Pi extension loads only in a trusted folder.
+# Pi as the operator or as workers: Herdr reads Pi's state exactly only with
+# its Pi integration. (Per-project trust for workers is checked below.)
 dh=$(cfg_get deck_harness fixer_harness "")
+rh=$(cfg_get worker_harness runner_harness "")
 if [ "$dh" = pi ] || [ "$me" = pi ]; then
   if command -v pi >/dev/null 2>&1; then ok "pi $(pi --version 2>/dev/null | head -n1)"
   else fl "the operator harness is pi, but pi is not installed"; fi
   if harness_trusts pi "$DECK_ROOT"; then ok "pi trusts the deck folder, so deck's Pi extension loads"
   else wn "pi doesn't trust $DECK_ROOT, so deck's Pi extension (watcher, write guard) won't load: bin/deck-trust --path $DECK_ROOT --grant --harness pi, or /trust in pi"; fi
-  if command -v herdr >/dev/null 2>&1; then
-    line=$(herdr integration status 2>/dev/null | grep -E '^pi:' | head -n1)
-    case $line in
-      *current*) ok "Herdr's Pi integration is installed" ;;
-      *) wn "Herdr's Pi integration isn't installed${line:+ (${line#pi: })}; Herdr will guess the operator's state from the screen: herdr integration install pi" ;;
-    esac
-  fi
 fi
-rh=$(cfg_get worker_harness runner_harness "")
+if { [ "$dh" = pi ] || [ "$me" = pi ] || [ "$rh" = pi ]; } && command -v herdr >/dev/null 2>&1; then
+  line=$(herdr integration status 2>/dev/null | grep -E '^pi:' | head -n1)
+  case $line in
+    *current*) ok "Herdr's Pi integration is installed" ;;
+    *) wn "Herdr's Pi integration isn't installed${line:+ (${line#pi: })}; Herdr will guess Pi's state from the screen: herdr integration install pi" ;;
+  esac
+fi
 if [ -n "$rh" ]; then
   if command -v "$rh" >/dev/null 2>&1; then ok "worker harness: $rh"; else fl "configured worker harness '$rh' is not installed"; fi
 fi

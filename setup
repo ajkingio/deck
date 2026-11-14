@@ -62,13 +62,12 @@ if command -v herdr >/dev/null 2>&1; then
 else
   bad "herdr is missing: install it from https://herdr.dev"; missing=1
 fi
-harnesses="" op_harnesses=""   # installed worker harnesses; installed operator harnesses (those plus pi)
+harnesses="" op_harnesses=""   # installed worker harnesses; installed operator harnesses
 for h in $DECK_HARNESSES; do command -v "$h" >/dev/null 2>&1 && harnesses="$harnesses $h"; done
 for h in $DECK_OPERATOR_HARNESSES; do command -v "$h" >/dev/null 2>&1 && op_harnesses="$op_harnesses $h"; done
 harnesses=${harnesses# } op_harnesses=${op_harnesses# }
 if [ -n "$harnesses" ]; then ok "agents: $op_harnesses"
-elif [ -n "$op_harnesses" ]; then bad "found $op_harnesses, which can be the Deck, but workers need Claude Code, Codex or Grok"; missing=1
-else bad "no supported agent found: install Claude Code, Codex or Grok (Pi can also be the Deck)"; missing=1; fi
+else bad "no supported agent found: install Claude Code, Codex, Grok or Pi"; missing=1; fi
 for t in gh glab; do
   if command -v $t >/dev/null 2>&1; then ok "$t"; else note "$t not installed (only needed for $( [ $t = gh ] && echo GitHub || echo GitLab ) PRs/MRs)"; fi
 done
@@ -79,7 +78,7 @@ if [ $missing = 1 ] && command -v brew >/dev/null 2>&1; then
   if [ -n "$pkgs" ] && confirm "Install$pkgs with Homebrew?" Y; then brew install $pkgs; fi
 fi
 for t in git jq herdr; do command -v $t >/dev/null 2>&1 || die "install $t, then run ./setup again"; done
-[ -n "$harnesses" ] || die "install an agent (claude, codex or grok), then run ./setup again"
+[ -n "$harnesses" ] || die "install an agent (claude, codex, grok or pi), then run ./setup again"
 if [ -z "$(git config user.name)" ] || [ -z "$(git config user.email)" ]; then
   warn_ "git user.name / user.email aren't set; workers need them to commit"
   n=$(ask "Your name for git commits:" "")
@@ -102,12 +101,16 @@ default_dh=$(cur deck_harness "$fallback_dh")
 deck_h=$(choose "Which agent is the Deck (the one you talk to)?" "$default_dh" $op_harnesses)
 if [ "$deck_h" = pi ]; then
   note "On Pi, deck's extension (.pi/extensions/deck-operator.ts) runs the watcher and blocks the Deck's writes to projects."
-  note "It loads only once Pi trusts this folder (asked below). Pi workers aren't supported yet."
+  note "It loads only once Pi trusts this folder (asked below)."
 fi
 default_wh=$(cur worker_harness "$deck_h")
 valid_harness "$default_wh" || default_wh=$fallback_dh
 # shellcheck disable=SC2086
 worker_h=$(choose "Which agent should workers use by default?" "$default_wh" $harnesses)
+if [ "$worker_h" = pi ]; then
+  note "Pi workers never ask before running a tool, and have no sandbox: they can write anywhere you can."
+  note "They use Pi's default model unless you set pi_worker_model (and pi_worker_thinking) in config/deck.conf."
+fi
 mode=$(choose "Default delivery for new projects: pr (open a PR/MR) or local (merge branches locally)?" "$(cur default_mode pr)" pr local)
 
 mkdir -p "$(dirname "$DECK_CONF")"

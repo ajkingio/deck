@@ -5,7 +5,7 @@
 #   deck-tell <id> --interrupt ["<message>"]
 #
 # --interrupt first stops the worker's current turn with its harness's interrupt
-# key (Escape for claude and codex, Ctrl+C for grok), then delivers the message
+# key (Escape for claude, codex and pi, Ctrl+C for grok), then delivers the message
 # if one is given. Use it on a worker that is looping or going the wrong way.
 #
 # Refuses if the worker is sitting at an approval/question dialog; inspect it with
@@ -23,7 +23,7 @@ need herdr; need jq
 # The key that cancels a running turn without quitting the harness.
 interrupt_key() { # <harness>
   case $1 in
-    claude|codex) echo esc ;;
+    claude|codex|pi) echo esc ;;  # pi: app.interrupt (docs/keybindings.md)
     grok) echo ctrl+c ;;
     *) return 1 ;;
   esac

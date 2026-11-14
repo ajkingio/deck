@@ -11,9 +11,8 @@ DECK_STATE="$DECK_ROOT/state"
 DECK_CONF="$DECK_ROOT/config/deck.conf"
 DECK_JOBS="$DECK_DATA/jobs"
 DECK_PROJECTS="$DECK_DATA/projects"
-DECK_HARNESSES="claude codex grok"   # harnesses a worker can run in
-# The operator can also run in Pi. Pi workers aren't supported yet.
-DECK_OPERATOR_HARNESSES="$DECK_HARNESSES pi"
+DECK_HARNESSES="claude codex grok pi"   # harnesses a worker can run in
+DECK_OPERATOR_HARNESSES="$DECK_HARNESSES"  # harnesses the operator can run in
 DECK_ALIAS=jackin             # the launcher alias ./setup installs
 DECK_GREETING="jacking in"    # what the launcher says to open each session
 
