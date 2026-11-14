@@ -9,7 +9,8 @@
 #   done | blocked | failed   the worker reported via deck-report
 #   dialog                    Herdr sees the worker stuck at an approval/question UI
 #   idle                      the worker stopped without reporting
-#   gone                      the worker's agent is no longer running
+#   gone                      the worker's agent is no longer running; the job's status
+#                             becomes 'gone' (bin/deck-spawn <id> --relaunch restarts it)
 #   none                      no running jobs to watch (exits immediately)
 #
 # Only one watcher runs per deck home; a second exits 3 with "already watching".
@@ -46,7 +47,8 @@ scan() { # prints events; updates job records
   local id s dir lines seen new ev rest info ast seq flag
   for id in $(job_ids); do
     s=$(job_get "$id" status)
-    case $s in running|blocked) ;; *) continue ;; esac
+    # A gone job is still read for reports its worker wrote just before exiting.
+    case $s in running|blocked|gone) ;; *) continue ;; esac
     dir=$(job_dir "$id")
 
     # 1. What the worker reported.
@@ -69,13 +71,16 @@ scan() { # prints events; updates job records
       case $s in running|blocked) ;; *) continue ;; esac
     fi
 
+    [ "$s" = gone ] && continue
+
     # 2. What Herdr sees.
     info=$(herdr agent get "$id" 2>/dev/null) || info=""
     ast=$(printf '%s' "$info" | jq -r '.result.agent.agent_status // empty' 2>/dev/null)
     seq=$(printf '%s' "$info" | jq -r '.result.agent.state_change_seq // 0' 2>/dev/null)
     flag=$(job_get "$id" herdr_flag "")
     if [ -z "$ast" ]; then
-      [ "$flag" = gone ] && continue
+      job_set "$id" status gone
+      [ "$flag" = gone ] && continue   # announced already (by a deck-wait from before the gone status)
       job_set "$id" herdr_flag gone
       printf '%s gone worker agent is no longer running\n' "$id"
       notify "$id: worker gone" "the worker exited without reporting" request

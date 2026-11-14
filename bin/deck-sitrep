@@ -37,7 +37,7 @@ group() { # <title> <statuses...>
 }
 
 echo "# sitrep $(now)"
-group "Needs the user" blocked review reported failed
+group "Needs the user" blocked gone review reported failed
 group "Running" starting running
 group "Queued" queued
 group "Recently landed" landed

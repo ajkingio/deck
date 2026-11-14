@@ -10,8 +10,9 @@
 # `new` creates data/jobs/<id>/ with job.conf (status=queued) and a brief.md
 # rendered from templates/. The operator then fills the DECK:FILL sections.
 #
-# Statuses: queued, starting, running, blocked, review, reported, landed,
-#           failed, closed, cancelled.
+# Statuses: queued, starting, running, blocked, gone, review, reported, landed,
+#           failed, closed, cancelled.  (gone: deck-wait saw the worker's agent exit
+#           without reporting; bin/deck-spawn <id> --relaunch restarts it.)
 . "$(dirname "$0")/deck-lib.sh"
 
 include_engrams() { # <project>
@@ -111,7 +112,7 @@ set)
   require_job "${1:-}"; job_set "$1" "${2:?key}" "${3?value}"
   ;;
 *)
-  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
   ;;
 esac
