@@ -3,18 +3,38 @@
 #
 #   deck-spawn <id>            create worktree + Herdr workspace, start the worker, send the brief
 #   deck-spawn <id> --resume   after the user cleared a startup dialog by hand: just send the brief
+#   deck-spawn <id> --relaunch [--note "<progress>"]
+#                              the worker is gone (or is being replaced): start a new one in the
+#                              same worktree and branch, telling it what happened so far
 #
 # Steps: git worktree add (branch deck/<id>) -> herdr workspace create ->
 # herdr agent start --kind <harness> -> herdr agent prompt "read your brief".
 # Each job owns exactly one Herdr workspace, labelled "└ <id>" and moved into
 # the block right after the operator's workspace (best-effort). The Herdr agent
 # name is the bare job id.
+#
+# --relaunch refuses while a live agent still holds the job's name in Herdr. It
+# never touches the worktree or branch. It reuses the job's pane when that pane
+# and its "└ <id>" workspace still exist, else creates a new workspace placed
+# like a normal spawn. The job record changes only once the new worker is up;
+# if the start fails, the record stays as it was (and a workspace created for
+# the attempt is closed). If the new worker stops at a startup dialog, the job
+# goes to 'starting' and --resume finishes the relaunch.
 . "$(dirname "$0")/deck-lib.sh"
 
 id=${1:-}; shift || true
 require_job "$id"
-resume=0
-[ "${1:-}" = --resume ] && resume=1
+resume=0 relaunch=0 note=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    --resume) resume=1; shift ;;
+    --relaunch) relaunch=1; shift ;;
+    --note) [ $# -ge 2 ] || die "--note needs a value"; note=$2; shift 2 ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+[ $resume = 1 ] && [ $relaunch = 1 ] && die "use either --resume or --relaunch, not both"
+[ -z "$note" ] || [ $relaunch = 1 ] || die "--note only goes with --relaunch"
 
 need git; need jq; need herdr
 [ "${HERDR_ENV:-}" = 1 ] || die "the operator is not running inside Herdr; start herdr in the deck directory and launch your agent inside it"
@@ -23,8 +43,52 @@ dir=$(job_dir "$id")
 status=$(job_get "$id" status)
 harness=$(job_get "$id" harness)
 wt=$(job_get "$id" worktree)
+created_ws=""   # a workspace this run created; closed again if a relaunch fails
 
-if [ $resume = 0 ]; then
+# On a failed relaunch start, put things back: close the workspace we made and
+# leave the job record untouched.
+start_failed() { # <message>
+  if [ $relaunch = 1 ] && [ -n "$created_ws" ]; then
+    herdr workspace close "$created_ws" >/dev/null 2>&1 || warn "could not close Herdr workspace $created_ws"
+  fi
+  die "$1"
+}
+
+if [ $relaunch = 1 ]; then
+  case $status in
+    queued) die "job $id has not been spawned yet; use: bin/deck-spawn $id" ;;
+    landed|closed|cancelled) die "job $id is $status; there is nothing to relaunch" ;;
+  esac
+  command -v "$harness" >/dev/null 2>&1 || die "worker harness '$harness' is not installed"
+  "$DECK_BIN/deck-trust" "$(job_get "$id" project)" --harness "$harness" --check >/dev/null ||
+    die "$harness doesn't trust project $(job_get "$id" project) yet, so the worker would stop at a trust dialog. With the user's word: bin/deck-trust $(job_get "$id" project) --grant --harness $harness"
+  [ -d "$wt" ] || die "worktree $wt is gone; nothing to relaunch into"
+  [ "$(git -C "$wt" symbolic-ref --short HEAD 2>/dev/null)" = "$(job_get "$id" branch)" ] ||
+    die "worktree $wt is not on branch $(job_get "$id" branch); refusing to relaunch into it"
+  if herdr agent get "$id" >/dev/null 2>&1; then
+    die "a live agent still owns job $id in Herdr. Steer it with bin/deck-tell $id --interrupt \"<message>\", or have the user quit it in workspace $(worker_ws_label "$id") first"
+  fi
+
+  # Reuse the old pane if it and its workspace are still there.
+  old_ws=$(job_get "$id" workspace) old_pane=$(job_get "$id" pane)
+  ws="" pane=""
+  if [ -n "$old_ws" ] && [ -n "$old_pane" ]; then
+    label=$(herdr workspace list 2>/dev/null | jq -r --arg w "$old_ws" '.result.workspaces[] | select(.workspace_id == $w) | .label' 2>/dev/null)
+    pws=$(herdr pane get "$old_pane" 2>/dev/null | jq -r '.result.pane.workspace_id // empty' 2>/dev/null)
+    if { [ "$label" = "$(worker_ws_label "$id")" ] || [ "$label" = "$id" ]; } && [ "$pws" = "$old_ws" ]; then
+      ws=$old_ws pane=$old_pane
+    fi
+  fi
+  if [ -z "$pane" ]; then
+    out=$(herdr workspace create --cwd "$wt" --label "$(worker_ws_label "$id")" --no-focus \
+      --env "DECK_JOB=$id" --env "DECK_HOME=$DECK_ROOT" --env "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false" 2>&1) \
+      || die "herdr workspace create failed: $out"
+    ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id')
+    pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id')
+    created_ws=$ws
+    group_worker_workspace "$ws"
+  fi
+elif [ $resume = 0 ]; then
   [ "$status" = queued ] || die "job $id is $status, not queued"
   grep -qE '(DECK|FIXER):FILL' "$dir/brief.md" && die "brief still has DECK:FILL markers; fill them in first: $dir/brief.md"
   command -v "$harness" >/dev/null 2>&1 || die "worker harness '$harness' is not installed"
@@ -98,22 +162,72 @@ if ! herdr agent get "$id" >/dev/null 2>&1; then
     code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
     if [ "$code" = agent_pane_busy ] && [ $tries -lt 30 ]; then tries=$((tries + 1)); sleep 1; continue; fi
     if [ "$code" = agent_not_ready ]; then
+      if [ $relaunch = 1 ]; then
+        # The agent is up but at a dialog: record it so --resume can finish the relaunch.
+        job_set "$id" workspace "$ws"; job_set "$id" pane "$pane"
+        job_set "$id" relaunch_pending 1; job_set "$id" relaunch_note "$note"
+        job_set "$id" status starting
+      fi
       die "worker $id is stopped at a startup dialog in Herdr workspace $ws ($(worker_ws_label "$id")). Read it with: herdr pane read $pane --source visible --lines 40. Ask the user to answer it there, then run: bin/deck-spawn $id --resume"
     fi
+    if [ $relaunch = 1 ]; then start_failed "herdr agent start failed: $out. The job record is unchanged; fix the cause, then retry: bin/deck-spawn $id --relaunch"; fi
     die "herdr agent start failed: $out. Fix the cause, then retry with: bin/deck-spawn $id --resume"
   done
 fi
 
-msg="You are worker $id, hired by deck. Read your brief at $dir/brief.md and follow it exactly. Start now."
+# A relaunch (or a --resume that finishes one) gets a preamble on top of the brief.
+pending=$(job_get "$id" relaunch_pending)
+[ $relaunch = 1 ] && pending=1
+if [ "$pending" = 1 ]; then
+  [ $relaunch = 1 ] || note=$(job_get "$id" relaunch_note)
+  since=$(job_get "$id" base_sha)
+  [ -n "$since" ] || since=$(job_get "$id" base)
+  msg="You are worker $id, hired by deck. You were relaunched: an earlier worker on this job stopped before it finished. Your worktree $wt and branch $(job_get "$id" branch) are exactly as it left them. Before anything else, run git status and git log $since..HEAD, and read $dir/status.log, to see what was already done. Then read your brief at $dir/brief.md and follow it exactly, continuing from where the work stopped."
+  [ -z "$note" ] || msg="$msg
+Progress note from deck: $note"
+  if [ -s "$dir/messages.log" ]; then
+    msg="$msg
+Messages deck sent the earlier worker (oldest first):
+$(tail -n 40 "$dir/messages.log")"
+  fi
+else
+  msg="You are worker $id, hired by deck. Read your brief at $dir/brief.md and follow it exactly. Start now."
+fi
 out=$(herdr agent prompt "$id" "$msg" --wait --timeout 20000 2>&1)
 rc=$?
 code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
 # A timeout here is the good case: the worker is still working on the job.
 if [ $rc -ne 0 ] && [ "$code" != timeout ]; then
-  die "could not hand the brief to worker $id ($code): $out"
+  if [ $relaunch = 1 ]; then
+    # The new agent is up but has no brief: record it so --resume can retry.
+    job_set "$id" workspace "$ws"; job_set "$id" pane "$pane"
+    job_set "$id" relaunch_pending 1; job_set "$id" relaunch_note "$note"
+    job_set "$id" status starting
+  fi
+  die "could not hand the brief to worker $id ($code): $out. Retry with: bin/deck-spawn $id --resume"
 fi
 
+if [ "$pending" = 1 ]; then
+  job_set "$id" workspace "$ws"
+  job_set "$id" pane "$pane"
+  # Watch only what the new worker reports; say so if the old one left
+  # reports nobody had read yet.
+  lines=$(wc -l <"$dir/status.log" | tr -d ' ')
+  seen=$(job_get "$id" seen_lines 0)
+  if [ "$lines" -gt "$seen" ]; then
+    warn "unread reports from the earlier worker, now skipped:"
+    tail -n "+$((seen + 1))" "$dir/status.log" >&2
+  fi
+  job_set "$id" seen_lines "$lines"
+  job_set "$id" herdr_flag ""
+  job_set "$id" relaunch_pending ""
+  job_set "$id" relaunch_note ""
+  job_set "$id" relaunched "$(now)"
+else
+  job_set "$id" started "$(now)"
+fi
 job_set "$id" status running
-job_set "$id" started "$(now)"
-echo "spawned $id: harness=$harness workspace=$ws pane=$pane worktree=$wt"
+verb=spawned
+[ "$pending" = 1 ] && verb=relaunched
+echo "$verb $id: harness=$harness workspace=$ws pane=$pane worktree=$wt"
 echo "next: make sure a watcher is running (bin/deck-wait)"
