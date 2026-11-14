@@ -97,7 +97,11 @@ case "${1:-} ${2:-}" in
   "agent get")
     [ -f "$a/$3" ] || { echo '{"error":{"code":"agent_not_found"}}'; exit 1; }
     printf '{"result":{"agent":{"agent":"claude","agent_status":"%s","state_change_seq":1}}}\n' "$(cat "$a/$3")" ;;
-  "agent prompt") ;;
+  "agent prompt")
+    # $STUB_DIR/herdr/prompt-fails holds an error code to fail with (e.g. agent_blocked).
+    if [ -f "$STUB_DIR/herdr/prompt-fails" ]; then
+      printf '{"error":{"code":"%s"}}\n' "$(cat "$STUB_DIR/herdr/prompt-fails")"; exit 1
+    fi ;;
   "notification show") ;;
   "pane get")
     # $STUB_DIR/herdr/panes/<pane> holds that pane's workspace id; others are the operator's.
