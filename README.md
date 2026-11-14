@@ -8,6 +8,8 @@ It's a lightweight take on [firstmate](https://github.com/kunchenguid/firstmate)
 
 There's nothing to install. The repo is the tool: an `AGENTS.md` contract, a few skills, and a handful of small shell scripts.
 
+The plan for Pi and local models is in [`ROADMAP.md`](ROADMAP.md).
+
 ## Requirements
 
 - [Herdr](https://herdr.dev) 0.9 or newer
