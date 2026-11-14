@@ -163,6 +163,19 @@ git pull upstream main
 
 Upstream never edits `learned/`, so what your Deck learned won't conflict.
 
+## Tests
+
+`bin/deck-test` runs the behaviour tests in `tests/`: plain bash, no framework. They cover the safety refusals (teardown, land, open, spawn, trust) and the job → spawn → report → wait path.
+
+```sh
+bin/deck-test                                # everything
+bin/deck-test land                           # one file: tests/land.test.sh
+bin/deck-test land local_refuses_dirty_checkout   # one test
+bin/deck-test --list                         # what's there
+```
+
+Each test runs in a throwaway sandbox (`tests/lib.sh`): a temp HOME, a temp deck home with copies of `bin/` and `templates/`, small git repos as projects, and stubs for `herdr`, `gh`, `glab` and `claude` that log their calls. It never touches your `~/.deck`, your Herdr session, your config or the network. A known bug is marked `xfail` until its fix lands; the run fails only on `FAIL`.
+
 ## Status
 
 Early. Claude Code has been tested end to end with Herdr 0.9.5 (as fixer, before the rename). Codex and Grok follow the same design but haven't been tested yet; see `DESIGN.md`.

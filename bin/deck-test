@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# deck-test: run deck's behaviour tests (tests/*.test.sh).
+#
+#   deck-test                  run every test file
+#   deck-test <file> [<test>]  run one file (e.g. land), or one test in it (e.g. land refuses_dirty_checkout)
+#   deck-test --list           list test files and their tests
+#
+# Each test runs in a throwaway sandbox (temp HOME, temp deck home, stubbed
+# herdr/gh/glab/claude), never the real ~/.deck, Herdr session, config or network.
+# Prints ok / FAIL / skip / xfail per test; exits non-zero if any test failed.
+# Plain bash 3.2, no test framework.
+set -u
+root="$(cd "$(dirname "$0")/.." && pwd -P)"
+tests="$root/tests"
+
+# Run each file with a clean environment: no Herdr pane, no DECK_JOB, no harness config.
+run_file() { # <file> [test]
+  env -i PATH="$PATH" TMPDIR="${TMPDIR:-/tmp}" LANG="${LANG:-C}" DECK_TEST_SRC="$root" \
+    /bin/bash "$1" ${2:+"$2"}
+}
+
+case ${1:-} in
+-h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+--list)
+  for f in "$tests"/*.test.sh; do
+    echo "$(basename "$f" .test.sh)"
+    grep -Eo '^test_[A-Za-z0-9_]+' "$f" | sed 's/^test_/  /'
+  done
+  exit 0 ;;
+esac
+
+if [ $# -gt 0 ]; then
+  f="$tests/${1%.test.sh}.test.sh"
+  [ -f "$f" ] || { echo "deck-test: no test file $f (see: bin/deck-test --list)" >&2; exit 2; }
+  files=$f
+  only=${2:-}
+else
+  files=$(ls "$tests"/*.test.sh)
+  only=""
+fi
+
+failed=""
+for f in $files; do
+  echo "$(basename "$f" .test.sh)"
+  run_file "$f" "$only" || failed="$failed $(basename "$f" .test.sh)"
+done
+
+if [ -n "$failed" ]; then
+  echo "FAILED:$failed"
+  exit 1
+fi
+echo "all passed"
