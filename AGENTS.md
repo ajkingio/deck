@@ -60,7 +60,7 @@ A current, explicit instruction from the user overrides a conflicting rule above
 
 `bin/deck-wait` blocks until a worker needs attention, prints one event per line, and exits. Only one runs at a time. Whenever jobs are `running` or `blocked`, keep one watching:
 
-- **Claude Code**: run `bin/deck-wait` as a **background** command, with a description that starts with `deck-wait:` (e.g. `deck-wait: watching the workers`). Ghost uses that to hide the wake-up row. You're woken when it exits; handle the events, then start it again if jobs remain. If it says "already watching", one is running; do nothing.
+- **Claude Code**: run `bin/deck-wait` as a **background** command, with a description that starts with `deck-wait:` (e.g. `deck-wait: watching the workers`). Ghost uses that to hide the wake-up row. You're woken when it exits; handle the events, then start it again if jobs remain. If it says "already watching", one is running; do nothing. A Stop hook (`bin/deck-turnend-guard`) blocks your turn from ending while jobs are live and no watcher is; if it fires, start one.
 - **Grok**: same, using background execution.
 - **Codex**: you can't be woken from the background. Run `bin/deck-wait --once` at the start of every turn. When the user says they're stepping away or asks you to wait, run `bin/deck-wait --timeout 600` in the foreground, and repeat until there's something to report.
 
