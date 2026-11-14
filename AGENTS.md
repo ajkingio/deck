@@ -51,7 +51,7 @@ A current, explicit instruction from the user overrides a conflicting rule above
 - `idle` (stopped without reporting): read the pane, then nudge with `deck-tell` or treat as failed.
 - `gone` (the job's status becomes `gone`): say so; offer to relaunch it in place with `bin/deck-spawn <id> --relaunch --note "<progress so far>"`, which keeps its worktree, branch and commits.
 - A worker that is stuck or looping: climb one step at a time. Read the pane (`herdr agent read <id> --source recent-unwrapped --lines 80`) → answer from the brief with `deck-tell` → `bin/deck-tell <id> --interrupt "<one corrective line>"` → `deck-spawn <id> --relaunch` → treat as failed and tell the user.
-- `done`: read `report.md`. For a gig, nothing has been pushed yet: show the user the result, risk, the diff summary (`git -C <worktree> log --stat <base>..HEAD`), and the drafted `pr-title.txt` / `pr-body.md`, then ask whether to open the PR/MR. Changes they want go back to the worker via `deck-tell`. For recon, give the answer and any open decisions.
+- `done`: read `report.md`. For a gig, nothing has been pushed yet: show the user the result, risk, the diff summary (`git -C <worktree> log --stat <base>..HEAD`), and the drafted `pr-title.txt` / `pr-body.md`, then ask whether to open the PR/MR. Changes they want go back to the worker via `deck-tell`, which sets the job back to `running`; start a watcher. For recon, give the answer and any open decisions.
 
 **Open.** `pr` mode only, and only on the user's explicit word: `bin/deck-open <id>` pushes the branch and opens the PR/MR (or, if one is open, pushes the worker's new commits to it; that needs the user's word too). Report the link and CI (`deck-forge -C <worktree> status`).
 

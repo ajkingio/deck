@@ -10,6 +10,12 @@
 #
 # Refuses if the worker is sitting at an approval/question dialog; inspect it with
 # `herdr agent read <id> --source recent-unwrapped --lines 80` and ask the user.
+#
+# Once a message is delivered, a job that was waiting on the operator goes back to
+# 'running' so bin/deck-wait watches it again: blocked (an answer), review (changes
+# to a finished gig) or reported (a follow-up to a recon). It prints
+# "<id>: <old> -> running"; start a watcher if none is running. A bare --interrupt
+# (no message) changes no status.
 . "$(dirname "$0")/deck-lib.sh"
 
 id=${1:-}; shift || true
@@ -57,5 +63,10 @@ case "$rc:$code" in
   *) die "could not reach worker $id ($code): $out" ;;
 esac
 printf '%s %s\n' "$(now)" "$msg" >>"$(job_dir "$id")/messages.log"
-case $(job_get "$id" status) in blocked) job_set "$id" status running ;; esac
+# The worker has new work: re-open the job for the watcher. seen_lines already
+# covers the worker's earlier report, so only its next one is an event.
+old=$(job_get "$id" status)
+case $old in
+  blocked|review|reported) job_set "$id" status running; echo "$id: $old -> running" ;;
+esac
 if [ $interrupt = 1 ]; then echo "interrupted and told $id"; else echo "told $id"; fi
