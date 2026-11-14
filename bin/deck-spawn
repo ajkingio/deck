@@ -46,6 +46,37 @@ valid_harness "$harness" || die "job $id's harness '$harness' can't run a worker
 wt=$(job_get "$id" worktree)
 created_ws=""   # a workspace this run created; closed again if a relaunch fails
 
+# Pi's launch arguments, worked out before anything is created so a refusal
+# leaves nothing behind. Pi never asks before a tool runs, so there is no
+# approval flag. Its trust is keyed by path (the closest saved decision wins)
+# and worktrees live outside the project's checkout, so trusting the checkout
+# doesn't cover them: pass --approve, which trusts project-local files for this
+# run only and writes nothing to trust.json, and only when the main checkout is
+# trusted. Flags are checked against `pi --help` first, since Pi changes quickly.
+pi_args=()
+if [ "$harness" = pi ] && command -v pi >/dev/null 2>&1; then
+  pproj=$(job_get "$id" project)
+  harness_trusts pi "$(project_get "$pproj" path)" ||
+    die "pi doesn't trust project $pproj yet, so deck won't pass --approve for its worktree. With the user's word: bin/deck-trust $pproj --grant --harness pi"
+  pihelp=$(pi --help 2>&1) || die "pi --help failed: $pihelp"
+  pi_flag() { printf '%s\n' "$pihelp" | grep -Eq -- "(^|[[:space:],])$1([^[:alnum:]_-]|$)"; }
+  for f in --append-system-prompt --name --approve; do
+    pi_flag "$f" || die "this pi doesn't support $f (see pi --help); update it with: pi update self"
+  done
+  pi_args=(--append-system-prompt "$DECK_ROOT/templates/worker-system.md" --name "$id" --approve)
+  # Optional model and thinking level; unset means Pi's own default.
+  pmodel=$(conf_get "$DECK_CONF" pi_worker_model "")
+  pthink=$(conf_get "$DECK_CONF" pi_worker_thinking "")
+  if [ -n "$pmodel" ]; then
+    pi_flag --model || die "pi_worker_model is set in config/deck.conf, but this pi doesn't support --model"
+    pi_args+=(--model "$pmodel")
+  fi
+  if [ -n "$pthink" ]; then
+    pi_flag --thinking || die "pi_worker_thinking is set in config/deck.conf, but this pi doesn't support --thinking"
+    pi_args+=(--thinking "$pthink")
+  fi
+fi
+
 # On a failed relaunch start, put things back: close the workspace we made and
 # leave the job record untouched.
 start_failed() { # <message>
@@ -154,6 +185,8 @@ if ! herdr agent get "$id" >/dev/null 2>&1; then
         -c "permissions.deck_worker={extends=\":workspace\",network={enabled=true},filesystem={$(tq "$dir")=\"write\",$(tq "$gcommon")=\"write\",$(tq "$gdir")=\"write\"}}" ;;
     grok)
       set -- --always-approve ;;
+    pi)
+      set -- ${pi_args[@]+"${pi_args[@]}"} ;;
   esac
 
   # A brand-new pane's shell may still be starting up; wait for its prompt.

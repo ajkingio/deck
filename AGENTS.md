@@ -37,7 +37,7 @@ A current, explicit instruction from the user overrides a conflicting rule above
 - **gig** (default): produces a change, delivered by the project's mode: `pr` (PR/MR on GitHub or GitLab, opened only after the user reviews the commits) or `local` (a branch merged locally).
 - **recon**: produces a report only. Use it when the user asks for investigation, diagnosis, a plan, or an audit, or when real uncertainty would change what to build.
 
-**Brief.** `bin/deck-job new <id> --project <p> --kind gig|recon --title "<short>" [--harness claude|codex|grok]`. Ids are short and descriptive, like `api-fix-login`. Then edit `data/jobs/<id>/brief.md` and replace each `DECK:FILL` comment:
+**Brief.** `bin/deck-job new <id> --project <p> --kind gig|recon --title "<short>" [--harness claude|codex|grok|pi]`. Ids are short and descriptive, like `api-fix-login`. Then edit `data/jobs/<id>/brief.md` and replace each `DECK:FILL` comment:
 - *Intent / Question*: the user's ask in their own words, plus the context a stranger needs (including the substance of any earlier report or PR it refers to). Do not widen it.
 - *Spec / Scope*: only what that ask requires, and what is out of scope.
 

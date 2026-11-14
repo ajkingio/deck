@@ -12,7 +12,9 @@
 # so trusting a project once covers every worker worktree made from it.
 # Pi (~/.pi/agent/trust.json) keys trust by path, the closest saved decision
 # winning, so its trust doesn't reach worktrees under ~/.deck/worktrees. deck
-# uses Pi only as the operator for now, where that doesn't matter.
+# still trusts only the main checkout: deck-spawn starts a Pi worker with
+# --approve (trust for that run only) when the checkout is trusted, and never
+# writes worktree entries.
 #
 # Without --grant, deck opens the agent in that folder and the user answers
 # the dialog themselves:

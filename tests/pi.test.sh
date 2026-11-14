@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Pi as the operator: launch, trust, doctor, deck-allow, refusing Pi workers,
-# and the Pi extension (.pi/extensions/deck-operator.ts, driven through node).
+# Pi as the operator and as a worker: launch, trust, doctor, deck-allow, spawn,
+# relaunch and interrupt for Pi workers, and the Pi extension
+# (.pi/extensions/deck-operator.ts, driven through node).
 . "$(dirname "$0")/lib.sh"
 
 pi_dir() { printf '%s\n' "$HOME/.pi/agent"; }
@@ -116,24 +117,180 @@ test_doctor_skips_pi_checks_for_claude_operator() {
   case $OUT in *"pi trusts"*|*"Pi integration"*) fail "pi checks ran for a claude operator: $OUT" ;; esac
 }
 
-# ---------------------------------------------------------------- workers, deck-allow
+# ---------------------------------------------------------------- workers
 
-test_job_refuses_pi_worker() {
-  make_project app local
-  run job new app-job --project app --kind gig --harness pi
-  expect_refused "pi runs the operator only for now"
-  [ ! -d "$DECK/data/jobs/app-job" ] || fail "job was created"
+PI_HELP='Options:
+  --model <pattern>              Model pattern or ID
+  --append-system-prompt <text>  Append text or file contents to the system prompt
+  --name, -n <name>              Set session display name
+  --thinking <level>             Set thinking level
+  --approve, -a                  Trust project-local files for this run
+  --no-approve, -na              Ignore project-local files for this run'
+
+# A pi stub that answers --help with $STUB_DIR/pi-help (default: $PI_HELP).
+use_pi_stub() {
+  printf '%s\n' "$PI_HELP" >"$T/pi-help"
+  cat >"$T/stubs/pi" <<'EOF2'
+#!/bin/bash
+printf 'pi %s\n' "$*" >>"$STUB_DIR/calls.log"
+case ${1:-} in
+  --help) cat "$STUB_DIR/pi-help" ;;
+  --version) echo 1.5.2 ;;
+esac
+exit 0
+EOF2
+  chmod +x "$T/stubs/pi"
 }
 
-test_spawn_refuses_pi_worker() {
-  make_project app local
-  deck job new app-job --project app --kind gig >/dev/null
+# A queued pi job on project <name> (default app), trusted by pi unless told not to.
+pi_job() { # [project] [untrusted]
+  local proj=${1:-app}
+  use_pi_stub
+  [ -f "$DECK/data/projects/$proj.conf" ] || make_project "$proj" local
+  if [ "${2:-}" != untrusted ]; then
+    mkdir -p "$(pi_dir)"
+    printf '{"%s": true}\n' "$(project_path "$proj")" >"$(pi_trust)"
+  fi
+  deck job new app-job --project "$proj" --kind gig --harness pi >/dev/null || fail "deck-job refused a pi worker"
   fill_brief app-job
-  deck job set app-job harness pi
-  HERDR_ENV=1 run spawn app-job
-  expect_refused "can't run a worker"
+  export HERDR_ENV=1
+}
+
+pi_start_args() { # the arguments deck passed to pi through herdr agent start
+  grep -F "herdr agent start app-job --kind pi" "$T/calls.log" | tail -n1 | sed 's/.* -- //'
+}
+
+test_job_accepts_pi_worker() {
+  make_project app local
+  run job new app-job --project app --kind gig --harness pi; expect_ok "job new"
+  expect_eq "$(job_value app-job harness)" pi "harness"
+}
+
+test_spawn_starts_pi_worker() {
+  pi_job
+  run spawn app-job; expect_ok "spawn"
+  expect_status app-job running
+  expect_called "herdr agent start app-job --kind pi --pane pane-1"
+  expect_eq "$(pi_start_args)" "--append-system-prompt $DECK/templates/worker-system.md --name app-job --approve" "pi arguments"
+  expect_called "--env DECK_JOB=app-job"
+  expect_called "herdr agent prompt app-job You are worker app-job"
+}
+
+test_spawn_passes_pi_model_and_thinking() {
+  pi_job
+  printf 'pi_worker_model=anthropic/claude-sonnet-5-5\npi_worker_thinking=high\n' >>"$DECK/config/deck.conf"
+  run spawn app-job; expect_ok "spawn"
+  expect_eq "$(pi_start_args)" "--append-system-prompt $DECK/templates/worker-system.md --name app-job --approve --model anthropic/claude-sonnet-5-5 --thinking high" "pi arguments"
+}
+
+test_spawn_refuses_untrusted_pi_project() {
+  pi_job app untrusted
+  run spawn app-job
+  expect_refused "bin/deck-trust app --grant --harness pi"
+  expect_status app-job queued
+  [ ! -e "$(job_value app-job worktree)" ] || fail "a worktree was created"
+  expect_not_called "agent start"
+  # A trusted ancestor with a closer untrusted decision is still untrusted.
+  mkdir -p "$(pi_dir)"
+  printf '{"%s": true, "%s": false}\n' "$(dirname "$(project_path app)")" "$(project_path app)" >"$(pi_trust)"
+  run spawn app-job
+  expect_refused "doesn't trust project app"
   expect_not_called "agent start"
 }
+
+test_spawn_writes_no_worktree_trust() {
+  pi_job
+  before=$(cat "$(pi_trust)")
+  run spawn app-job; expect_ok "spawn"
+  expect_eq "$(cat "$(pi_trust)")" "$before" "trust.json"
+}
+
+test_spawn_refuses_pi_without_needed_flags() {
+  pi_job
+  printf '%s\n' "$PI_HELP" | grep -v -- --approve >"$T/pi-help"
+  run spawn app-job
+  expect_refused "doesn't support --approve"
+  [ ! -e "$(job_value app-job worktree)" ] || fail "a worktree was created"
+  printf '%s\n' "$PI_HELP" | grep -v -- --thinking >"$T/pi-help"
+  printf 'pi_worker_thinking=high\n' >>"$DECK/config/deck.conf"
+  run spawn app-job
+  expect_refused "doesn't support --thinking"
+  expect_not_called "agent start"
+}
+
+test_relaunch_pi_worker() {
+  pi_job
+  deck spawn app-job >/dev/null 2>&1 || fail "initial spawn failed"
+  rm "$T/herdr/agents/app-job"
+  deck wait --once >/dev/null
+  expect_status app-job gone
+  : >"$T/calls.log"
+  run spawn app-job --relaunch --note "half done"; expect_ok "relaunch"
+  expect_status app-job running
+  expect_eq "$(pi_start_args)" "--append-system-prompt $DECK/templates/worker-system.md --name app-job --approve" "pi arguments"
+  expect_called "You were relaunched"
+}
+
+test_interrupt_pi_worker_sends_escape() {
+  pi_job
+  deck spawn app-job >/dev/null 2>&1 || fail "spawn failed"
+  : >"$T/calls.log"
+  export DECK_INTERRUPT_SETTLE=0
+  run tell app-job --interrupt "stop and rerun the tests"; expect_ok "interrupt"
+  expect_called "herdr agent send-keys app-job esc"
+  expect_called "Message from deck: stop and rerun the tests"
+}
+
+test_doctor_checks_pi_worker_trust() {
+  use_pi_stub
+  make_project app local
+  printf 'worker_harness=pi\n' >>"$DECK/config/deck.conf"
+  run doctor --brief
+  expect_out "WARN  project app: not trusted by pi yet; workers can't start there (bin/deck-trust app --grant --harness pi)"
+  expect_out "WARN  Herdr's Pi integration isn't installed"
+  case $OUT in *"deck's Pi extension"*) fail "operator-only pi check ran for pi workers: $OUT" ;; esac
+  mkdir -p "$(pi_dir)"
+  printf '{"%s": true}\n' "$(project_path app)" >"$(pi_trust)"
+  run doctor
+  expect_out "OK    project app: trusted by pi"
+  expect_out "OK    worker harness: pi"
+}
+
+# A Pi worker on the deck project runs with --approve in a linked worktree of
+# deck, so Pi loads deck's own extension there. It must register nothing.
+test_extension_inert_for_pi_worker_on_deck() {
+  command -v node >/dev/null 2>&1 || skip "node is not installed"
+  node -e 'process.exit(process.features.typescript ? 0 : 1)' 2>/dev/null ||
+    skip "this node can't load TypeScript directly (needs 22.18+)"
+  src="$T/src/deck"
+  mkdir -p "$src/.pi/extensions" "$src/data/jobs"
+  cp "$DECK_SRC/.pi/extensions/deck-operator.ts" "$src/.pi/extensions/"
+  printf 'data/\n' >"$src/.gitignore"
+  git -C "$src" init --quiet
+  git -C "$src" add .gitignore .pi
+  git -C "$src" commit --quiet -m "deck"
+  deck project add "$src" --name deck --mode local --base main >/dev/null
+  pi_job deck
+  run spawn app-job; expect_ok "spawn"
+  wt=$(job_value app-job worktree)
+  ext="$wt/.pi/extensions/deck-operator.ts"
+  [ -f "$ext" ] || fail "the worktree has no extension to test: $ext"
+  # The operator's own checkout activates it; the worker's worktree must not.
+  cat >"$T/inert.mjs" <<'EOF2'
+import { pathToFileURL } from "node:url";
+const [file] = process.argv.slice(2);
+const m = await import(pathToFileURL(file).href);
+const handlers = [];
+m.default({ on: (name) => handlers.push(name), sendUserMessage: async () => {} });
+console.log(handlers.length);
+EOF2
+  n=$(NODE_NO_WARNINGS=1 node "$T/inert.mjs" "$ext" 2>&1) || fail "node failed: $n"
+  expect_eq "$n" 0 "handlers registered in the worker's worktree"
+  n=$(NODE_NO_WARNINGS=1 node "$T/inert.mjs" "$src/.pi/extensions/deck-operator.ts" 2>&1) || fail "node failed: $n"
+  [ "$n" -gt 0 ] || fail "the extension registered nothing in the operator's checkout either; the test proves nothing"
+}
+
+# ---------------------------------------------------------------- deck-allow
 
 test_allow_is_a_no_op_on_pi() {
   use_pi_operator
