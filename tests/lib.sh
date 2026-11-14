@@ -65,18 +65,32 @@ write_stubs() {
 printf 'herdr %s\n' "$*" >>"$STUB_DIR/calls.log"
 a="$STUB_DIR/herdr/agents"
 case "$1 $2" in
-  "workspace create") echo '{"result":{"workspace":{"workspace_id":"ws-1"},"root_pane":{"pane_id":"pane-1"}}}' ;;
+  "workspace create")
+    # Canned ids from $STUB_DIR/herdr/new-workspace ("<ws> <pane>"), else ws-1/pane-1.
+    set -- ws-1 pane-1
+    [ ! -f "$STUB_DIR/herdr/new-workspace" ] || set -- $(cat "$STUB_DIR/herdr/new-workspace")
+    printf '{"result":{"workspace":{"workspace_id":"%s"},"root_pane":{"pane_id":"%s"}}}\n' "$1" "$2" ;;
   "workspace list")
     if [ -f "$STUB_DIR/herdr/workspaces.json" ]; then cat "$STUB_DIR/herdr/workspaces.json"
     else echo '{"result":{"workspaces":[]}}'; fi ;;
   "workspace close") ;;
-  "agent start") echo "working" >"$a/$3" ;;
+  "agent start")
+    # $STUB_DIR/herdr/start-fails holds an error code to fail with.
+    if [ -f "$STUB_DIR/herdr/start-fails" ]; then
+      printf '{"error":{"code":"%s"}}\n' "$(cat "$STUB_DIR/herdr/start-fails")"; exit 1
+    fi
+    echo "working" >"$a/$3" ;;
+  "agent send-keys") [ -f "$a/$3" ] || { echo '{"error":{"code":"agent_not_found"}}'; exit 1; } ;;
   "agent get")
     [ -f "$a/$3" ] || { echo '{"error":{"code":"agent_not_found"}}'; exit 1; }
     printf '{"result":{"agent":{"agent":"claude","agent_status":"%s","state_change_seq":1}}}\n' "$(cat "$a/$3")" ;;
   "agent prompt") ;;
   "notification show") ;;
-  "pane get") echo '{"result":{"pane":{"workspace_id":"ws-operator"}}}' ;;
+  "pane get")
+    # $STUB_DIR/herdr/panes/<pane> holds that pane's workspace id; others are the operator's.
+    w=ws-operator
+    [ ! -f "$STUB_DIR/herdr/panes/$3" ] || w=$(cat "$STUB_DIR/herdr/panes/$3")
+    printf '{"result":{"pane":{"workspace_id":"%s"}}}\n' "$w" ;;
   *) echo "herdr stub: unhandled: $*" >&2; exit 1 ;;
 esac
 EOF

@@ -52,8 +52,10 @@ test_wait_reports_gone_worker_once() {
   make_review_job gone-job app; deck job set gone-job status running
   run wait --once; expect_ok
   expect_eq "$OUT" "gone-job gone worker agent is no longer running" "wait output"
+  expect_status gone-job gone
+  # Announced once; a gone job isn't live, so there is nothing left to watch.
   run wait --once
-  expect_eq "$OUT" "no events" "second wait"
+  expect_eq "$OUT" "none no running jobs to watch" "second wait"
 }
 
 test_wait_refuses_second_watcher() {

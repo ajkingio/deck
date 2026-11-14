@@ -2,6 +2,11 @@
 # deck-tell: send a message to a worker (an answer, a steer, a stop request).
 #
 #   deck-tell <id> "<message>"
+#   deck-tell <id> --interrupt ["<message>"]
+#
+# --interrupt first stops the worker's current turn with its harness's interrupt
+# key (Escape for claude and codex, Ctrl+C for grok), then delivers the message
+# if one is given. Use it on a worker that is looping or going the wrong way.
 #
 # Refuses if the worker is sitting at an approval/question dialog; inspect it with
 # `herdr agent read <id> --source recent-unwrapped --lines 80` and ask the user.
@@ -9,9 +14,39 @@
 
 id=${1:-}; shift || true
 require_job "$id"
+interrupt=0
+[ "${1:-}" = --interrupt ] && { interrupt=1; shift; }
 msg="$*"
-[ -n "$msg" ] || die "usage: deck-tell <id> \"<message>\""
+[ -n "$msg" ] || [ $interrupt = 1 ] || die "usage: deck-tell <id> \"<message>\"  or  deck-tell <id> --interrupt [\"<message>\"]"
 need herdr; need jq
+
+# The key that cancels a running turn without quitting the harness.
+interrupt_key() { # <harness>
+  case $1 in
+    claude|codex) echo esc ;;
+    grok) echo ctrl+c ;;
+    *) return 1 ;;
+  esac
+}
+
+if [ $interrupt = 1 ]; then
+  harness=$(job_get "$id" harness)
+  key=$(interrupt_key "$harness") || die "no known interrupt key for harness '$harness'; refusing to guess"
+  ast=$(herdr agent get "$id" 2>/dev/null | jq -r '.result.agent.agent_status // empty' 2>/dev/null)
+  [ -n "$ast" ] || die "worker $id has no live agent in Herdr; relaunch it with: bin/deck-spawn $id --relaunch"
+  [ "$ast" != blocked ] || die "worker $id is at a dialog, and $key could answer it; read it with: herdr agent read $id --source recent-unwrapped --lines 80"
+  case $ast in
+    idle|done)
+      # Nothing to cancel, and grok's Ctrl+C on an idle prompt can quit it.
+      echo "worker $id is $ast, not mid-turn; no interrupt sent"
+      interrupt=0 ;;
+    *)
+      out=$(herdr agent send-keys "$id" "$key" 2>&1) || die "could not send $key to worker $id: $out"
+      printf '%s [interrupt]\n' "$(now)" >>"$(job_dir "$id")/messages.log"
+      sleep "${DECK_INTERRUPT_SETTLE:-1}" ;;  # let the harness return to its prompt
+  esac
+  if [ -z "$msg" ]; then [ $interrupt = 0 ] || echo "interrupted $id"; exit 0; fi
+fi
 
 out=$(herdr agent prompt "$id" "Message from deck: $msg" --wait --timeout 15000 2>&1)
 rc=$?
@@ -23,4 +58,4 @@ case "$rc:$code" in
 esac
 printf '%s %s\n' "$(now)" "$msg" >>"$(job_dir "$id")/messages.log"
 case $(job_get "$id" status) in blocked) job_set "$id" status running ;; esac
-echo "told $id"
+if [ $interrupt = 1 ]; then echo "interrupted and told $id"; else echo "told $id"; fi
