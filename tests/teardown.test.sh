@@ -67,21 +67,32 @@ test_refuses_pr_work_until_merged() {
   make_project api pr
   make_review_job api-job api
   wt=$(job_value api-job worktree)
-  forge_pr OPEN SUCCESS
+  head=$(git -C "$wt" rev-parse HEAD)
+  forge_pr OPEN SUCCESS "$head"
   run teardown api-job
   expect_refused "has not landed; refusing"
   [ -d "$wt" ] || fail "worktree was removed"
   rm "$T/forge/pr.json"
   run teardown api-job
   expect_refused "has not landed; refusing"
-  forge_pr MERGED SUCCESS
+  forge_pr MERGED SUCCESS "$head"
   run teardown api-job; expect_ok "teardown after merge"
   expect_status api-job closed
 }
 
-# Known gap: in pr mode "landed" only asks the forge whether the PR merged. A
-# commit the worker made after the merge (never pushed) is not part of what
-# landed, yet teardown removes the worktree and force-deletes the branch.
+test_allows_pr_work_when_branch_is_merged_head() {
+  make_project api pr
+  make_review_job api-job api
+  wt=$(job_value api-job worktree)
+  forge_pr MERGED SUCCESS "$(git -C "$wt" rev-parse HEAD)"
+  run teardown api-job; expect_ok "teardown"
+  [ ! -d "$wt" ] || fail "worktree still there"
+  ! branch_exists api deck/api-job || fail "landed branch was not deleted"
+  expect_status api-job closed
+}
+
+# In pr mode the forge's "merged" covers only the merged head. A commit the
+# worker made after the merge (never pushed) has not landed.
 test_refuses_pr_commits_made_after_merge() {
   make_project api pr
   make_review_job api-job api
@@ -91,10 +102,17 @@ test_refuses_pr_commits_made_after_merge() {
   echo "late" >"$wt/late.txt"; git -C "$wt" add late.txt; git -C "$wt" commit --quiet -m "after merge"
   late=$(git -C "$wt" rev-parse HEAD)
   run teardown api-job
-  if [ "$rc" != 0 ]; then
-    fail "teardown now refuses commits made after the merge; the gap is fixed, turn this back into a plain test"
-  fi
-  xfail "teardown deleted deck/api-job with unmerged commit $late (PR merged at an older head); see report Follow-ups"
+  expect_refused "commits that were not merged"
+  expect_out "after merge"
+  expect_out "--discard"
+  [ -d "$wt" ] || fail "worktree was removed"
+  expect_eq "$(git -C "$(project_path api)" rev-parse deck/api-job)" "$late" "deck/api-job"
+  expect_status api-job review
+
+  run teardown api-job --discard; expect_ok "teardown --discard"
+  [ ! -d "$wt" ] || fail "worktree still there"
+  branch_exists api deck/api-job || fail "--discard deleted the branch"
+  expect_status api-job cancelled
 }
 
 test_closes_only_its_own_workspace() {

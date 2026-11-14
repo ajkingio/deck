@@ -4,8 +4,8 @@
 #   deck-teardown <id>             refuses unless the work has landed
 #   deck-teardown <id> --discard   the user explicitly said to throw this work away
 #
-# Landed means: gig/pr -> PR/MR merged; gig/local -> branch merged into base;
-# recon -> report.md exists. The deck/<id> branch is deleted only when landed;
+# Landed means: gig/pr -> PR/MR merged, and deck/<id> has no commits beyond the
+# merged head; gig/local -> branch merged into base; recon -> report.md exists. The deck/<id> branch is deleted only when landed;
 # with --discard the branch is kept as a last safety net.
 . "$(dirname "$0")/deck-lib.sh"
 
@@ -24,11 +24,32 @@ ws=$(job_get "$id" workspace)
 ppath=$(project_get "$(job_get "$id" project)" path)
 
 landed=0
+why=""
 case $kind:$mode in
   recon:*) [ -s "$dir/report.md" ] && landed=1 ;;
   gig:pr)
-    st=$(project_forge "$(job_get "$id" project)" -C "$ppath" status "$branch" 2>/dev/null | jq -r .state 2>/dev/null)
-    [ "$st" = merged ] && landed=1 ;;
+    st=$(project_forge "$(job_get "$id" project)" -C "$ppath" status "$branch" 2>/dev/null)
+    if [ "$(printf '%s' "$st" | jq -r .state 2>/dev/null)" = merged ]; then
+      # The forge's "merged" covers only the head that was merged. Commits made
+      # on the branch after it (never pushed) have not landed.
+      head=$(printf '%s' "$st" | jq -r '.head_sha // empty' 2>/dev/null)
+      if ! git -C "$ppath" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null; then
+        landed=1
+      else
+        for sha in "$head" "$(job_get "$id" landed_sha)"; do
+          [ -n "$sha" ] || continue
+          git -C "$ppath" merge-base --is-ancestor "$branch" "$sha" 2>/dev/null && { landed=1; break; }
+        done
+        if [ $landed = 0 ]; then
+          if [ -n "$head" ] && git -C "$ppath" cat-file -e "$head^{commit}" 2>/dev/null; then
+            why="the PR/MR for $branch merged at $(git -C "$ppath" rev-parse --short "$head"), but $branch has commits that were not merged:
+$(git -C "$ppath" log --oneline "$head..$branch")"
+          else
+            why="the PR/MR for $branch merged, but its merged head (${head:-unknown}) is not in $ppath, so $branch cannot be confirmed fully merged"
+          fi
+        fi
+      fi
+    fi ;;
   gig:local)
     git -C "$ppath" merge-base --is-ancestor "$branch" "$base" 2>/dev/null && landed=1 ;;
 esac
@@ -37,6 +58,8 @@ dirty=""
 [ -d "$wt" ] && dirty=$(git -C "$wt" status --porcelain 2>/dev/null)
 
 if [ $discard = 0 ]; then
+  [ -z "$why" ] || die "job $id: $why
+refusing. --discard would throw this away; only if the user explicitly wants that: deck-teardown $id --discard"
   [ $landed = 1 ] || die "job $id has not landed; refusing. If the user explicitly wants it thrown away: deck-teardown $id --discard"
   [ -z "$dirty" ] || die "worktree $wt has uncommitted changes; refusing"
 fi
