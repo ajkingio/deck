@@ -47,6 +47,7 @@ new)
   require_project "$project"
   case $kind in gig|recon) ;; *) die "--kind must be gig or recon" ;; esac
   [ -n "$harness" ] || harness=$(default_harness)
+  [ "$harness" != pi ] || die "pi runs the operator only for now; deck can't start Pi workers yet (worker harnesses: $DECK_HARNESSES)"
   valid_harness "$harness" || die "unsupported harness '$harness' (supported: $DECK_HARNESSES)"
 
   dir=$(job_dir "$id")

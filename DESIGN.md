@@ -47,7 +47,7 @@ Renamed from fixer to deck (2026-11-12): the Fixer became the Deck, the client t
 ## Supported environment
 
 - **Session backend: Herdr ≥ 0.9** (only). The operator must itself run inside a Herdr pane (`HERDR_ENV=1`) so workers appear in the same session the user watches. `deck-spawn` refuses otherwise.
-- **Harnesses: Claude Code, Codex, Grok**, each usable as the operator and as a worker. Worker harness is chosen per job, defaulting to `worker_harness` in `config/deck.conf`, defaulting to the operator's own harness.
+- **Harnesses: Claude Code, Codex, Grok**, each usable as the operator and as a worker; **Pi** as the operator only (Pi workers are a later change). Worker harness is chosen per job, defaulting to `worker_harness` in `config/deck.conf`, defaulting to the operator's own harness.
 - **Usage:** fork the repo, clone the fork, run `herdr` in it, run the agent inside Herdr.
 - **Forges: GitHub (`gh`) and GitLab (`glab`)**, including self-hosted GitLab.
 - **Other:** `git`, `jq`.
@@ -61,6 +61,8 @@ CLAUDE.md              @AGENTS.md   (Codex and Grok read AGENTS.md natively)
 DESIGN.md              this file
 .agents/skills/        shared skills; .claude/skills -> ../.agents/skills
 .claude/settings.json  registers the Stop hook (deck-turnend-guard)
+.pi/extensions/        deck-operator.ts: the Pi operator's watcher, settle backstop and write guard
+.pi/prompts/           /scan and /defrag for Pi (they point at the skills)
 templates/             gig-brief.md, recon-brief.md, worker-system.md
 bin/
   deck-doctor          dependency + environment check
@@ -133,6 +135,7 @@ Gotchas baked into the adapter:
 
 - **Claude Code:** `deck-wait` runs as a background command; Claude is re-invoked when it exits. First-class. `deck-turnend-guard`, a Stop hook, backs this up: it blocks a turn from ending while jobs are `running`/`blocked` and `state/wait.pid` names no live deck-wait. It allows when `stop_hook_active` is set, after 3 blocks in 10 minutes, on any error, and in linked worktrees or homes without `data/jobs`, so it is inert for workers on deck itself.
 - **Grok:** background notification around `deck-wait`, same shape. Needs verification on a machine with Grok installed.
+- **Pi:** no background shell command, so the project extension `.pi/extensions/deck-operator.ts` owns the watcher. In the operator's home (same scope rule as `deck-turnend-guard`) it runs `bin/deck-wait` as a child process whenever jobs are `running`/`blocked`, checked at session start, when a turn settles and after each exit; delivers the events as a follow-up user message; and restarts it. An "already watching" exit is retried every 30s; other failures back off. `agent_before_settle` is the backstop: it starts a watcher if none is alive. Pi never asks before a tool runs, so the extension also enforces hard rule 1 with a `tool_call` gate: `write`/`edit`, and bash output redirections and `tee`, are blocked under `projects/`, registered project paths, job worktrees and the deck repo, except the deck repo's `config/`, `data/`, `state/`, `learned/` and `.agents/skills/` (the last two for accepted `/defrag` proposals). Other bash writes are not caught. It loads only when Pi trusts the deck folder (`deck-trust --path <deck> --grant --harness pi` writes `~/.pi/agent/trust.json`). `deck-allow` is a no-op on Pi.
 - **Codex:** no background re-invocation. v1 uses bounded foreground waits when the user is idle; the user can't chat during a wait. A Stop-hook integration is a later improvement.
 
 ## Skills (v1)

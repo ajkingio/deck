@@ -6,8 +6,9 @@
 #                          (still confirms if workers are live)
 #
 # Fresh start: a headless Herdr server for the session (default name: deck),
-# one workspace at this repo, the operator's harness started there with the
-# opening line (claude "jacking in"), then attach.
+# one workspace at this repo, the operator's harness (deck_harness: claude,
+# codex, grok or pi) started there with the opening line ("jacking in"), then
+# attach.
 # If the session already exists: asks to open it or start a new one. A new one
 # replaces the old: stopping it ends every pane in it, so live workers are
 # listed and must be confirmed. Worktrees and job records on disk are kept.
@@ -19,6 +20,7 @@ need herdr; need jq
 session=$(conf_get "$DECK_CONF" herdr_session deck)
 harness=$(cfg_get deck_harness fixer_harness claude)
 greeting=$DECK_GREETING
+valid_operator_harness "$harness" || die "deck_harness=$harness in $DECK_CONF isn't one deck can run the operator in ($DECK_OPERATOR_HARNESSES)"
 command -v "$harness" >/dev/null 2>&1 || die "$harness is not installed"
 
 force_new=0

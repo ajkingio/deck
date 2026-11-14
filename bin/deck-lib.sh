@@ -11,7 +11,9 @@ DECK_STATE="$DECK_ROOT/state"
 DECK_CONF="$DECK_ROOT/config/deck.conf"
 DECK_JOBS="$DECK_DATA/jobs"
 DECK_PROJECTS="$DECK_DATA/projects"
-DECK_HARNESSES="claude codex grok"
+DECK_HARNESSES="claude codex grok"   # harnesses a worker can run in
+# The operator can also run in Pi. Pi workers aren't supported yet.
+DECK_OPERATOR_HARNESSES="$DECK_HARNESSES pi"
 DECK_ALIAS=jackin             # the launcher alias ./setup installs
 DECK_GREETING="jacking in"    # what the launcher says to open each session
 
@@ -109,13 +111,16 @@ worktree_root() {
 # harness ----------------------------------------------------------------------
 
 valid_harness() { case " $DECK_HARNESSES " in *" $1 "*) return 0 ;; esac; return 1; }
+valid_operator_harness() { case " $DECK_OPERATOR_HARNESSES " in *" $1 "*) return 0 ;; esac; return 1; }
 
-# The harness the operator itself is running in, as Herdr sees it.
+# The harness the operator itself is running in, as Herdr sees it (or, failing
+# that, pi when Pi's shell tool set PI_CODING_AGENT).
 operator_harness() {
   local h=""
   if [ "${HERDR_ENV:-}" = 1 ] && [ -n "${HERDR_PANE_ID:-}" ] && command -v herdr >/dev/null 2>&1; then
     h=$(herdr agent get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.agent.agent // empty' 2>/dev/null)
   fi
+  [ -n "$h" ] || [ "${PI_CODING_AGENT:-}" != true ] || h=pi
   printf '%s\n' "$h"
 }
 
@@ -172,6 +177,13 @@ harness_trusts() { # <harness> <path>
         substr(l, 1, length(k)) == k && substr(l, length(k) + 1) ~ /^[ \t]*=/ { found = 1 }
         l ~ /^\[/ && (l == "[" k "]" || l == "[[" k "]]" || substr(l, length(l) - length(k) - 1) == "." k "]") { found = 1 }
         END { exit !found }' "$f" ;;
+    pi)
+      # Pi keys trust by path and the closest saved decision wins: the nearest
+      # of <path> and its ancestors that has an entry decides.
+      f="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/trust.json"
+      [ -f "$f" ] && jq -e --arg p "$p" '
+        . as $t | [$p | recurse(if . == "/" then empty else (sub("/[^/]*$"; "") | if . == "" then "/" else . end) end)]
+        | map(. as $a | select($t | has($a))) | .[0] as $k | $k != null and $t[$k] == true' "$f" >/dev/null 2>&1 ;;
     *) return 1 ;;
   esac
 }

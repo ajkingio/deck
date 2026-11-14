@@ -42,6 +42,7 @@ need git; need jq; need herdr
 dir=$(job_dir "$id")
 status=$(job_get "$id" status)
 harness=$(job_get "$id" harness)
+valid_harness "$harness" || die "job $id's harness '$harness' can't run a worker (worker harnesses: $DECK_HARNESSES)"
 wt=$(job_get "$id" worktree)
 created_ws=""   # a workspace this run created; closed again if a relaunch fails
 
