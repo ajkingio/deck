@@ -11,7 +11,7 @@ There's nothing to install. The repo is the tool: an `AGENTS.md` contract, a few
 ## Requirements
 
 - [Herdr](https://herdr.dev) 0.9 or newer
-- One of: [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), Grok
+- One of: [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), Grok (Pi can also be the Deck, but workers need one of these)
 - `git` and `jq`
 - For PRs: `gh` (GitHub) and/or `glab` (GitLab, including self-hosted), logged in
 

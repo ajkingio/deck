@@ -6,7 +6,7 @@
 #   $T        the sandbox root (a temp dir, removed afterwards)
 #   $DECK     a deck home: copies of the repo's bin/ and templates/, empty config/ data/ state/
 #   HOME      $T/home, with its own .gitconfig
-#   PATH      $T/stubs (herdr, gh, glab, claude) + $T/tools (git, jq) + the system dirs
+#   PATH      $T/stubs (herdr, gh, glab, claude) + $T/tools (git, jq, and node if installed) + the system dirs
 # The stubs return canned output and append each call to $T/calls.log. Nothing
 # reaches the real ~/.deck, the real Herdr session, the user's config, or the network.
 
@@ -22,7 +22,7 @@ sandbox() {
   for v in $(env | sed -n 's/^\(HERDR_[A-Za-z0-9_]*\)=.*/\1/p; s/^\(DECK_[A-Za-z0-9_]*\)=.*/\1/p; s/^\(FIXER_[A-Za-z0-9_]*\)=.*/\1/p; s/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p'); do
     case $v in DECK_TEST_SRC|DECK_SRC) ;; *) unset "$v" ;; esac
   done
-  unset CLAUDE_CONFIG_DIR CODEX_HOME GROK_HOME TMUX
+  unset CLAUDE_CONFIG_DIR CODEX_HOME GROK_HOME TMUX PI_CODING_AGENT PI_CODING_AGENT_DIR
 
   T=$(mktemp -d "${TMPDIR:-/tmp}/deck-test.XXXXXX") || exit 1
   T=$(cd "$T" && pwd -P)
@@ -38,6 +38,8 @@ sandbox() {
     v=$(command -v "$tool") || { echo "deck-test: $tool is required" >&2; exit 1; }
     ln -s "$v" "$T/tools/$tool"
   done
+  # Optional: only the Pi extension's tests use node, and they skip without it.
+  v=$(command -v node) && ln -s "$v" "$T/tools/node"
   write_stubs
 
   export HOME="$T/home"
@@ -64,7 +66,18 @@ write_stubs() {
 # herdr stub. Agents are files under $STUB_DIR/herdr/agents/<name> holding an agent_status.
 printf 'herdr %s\n' "$*" >>"$STUB_DIR/calls.log"
 a="$STUB_DIR/herdr/agents"
-case "$1 $2" in
+[ "${1:-}" != --session ] || shift 2   # one stubbed session serves every name
+case "${1:-} ${2:-}" in
+  "--version ") echo "herdr 0.9.5" ;;
+  "server ") ;;
+  "session list")
+    if [ -f "$STUB_DIR/herdr/sessions.json" ]; then cat "$STUB_DIR/herdr/sessions.json"
+    else echo '{"sessions":[]}'; fi ;;
+  "integration status")
+    # $STUB_DIR/herdr/integrations holds the status lines; else none installed.
+    if [ -f "$STUB_DIR/herdr/integrations" ]; then cat "$STUB_DIR/herdr/integrations"
+    else echo "pi: not installed (~/.pi/agent/extensions/herdr-agent-state.ts)"; echo "claude: not installed (~/.claude/hooks/herdr-agent-state.sh)"; fi ;;
+  "agent wait") [ -f "$a/$3" ] || { echo '{"error":{"code":"agent_not_found"}}'; exit 1; } ;;
   "workspace create")
     # Canned ids from $STUB_DIR/herdr/new-workspace ("<ws> <pane>"), else ws-1/pane-1.
     set -- ws-1 pane-1

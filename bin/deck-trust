@@ -2,7 +2,7 @@
 # deck-trust: trust a folder once, so agents never stop at a folder-trust
 # dialog there.
 #
-#   deck-trust <project> [--harness claude|codex|grok]   open the agent; the user answers its dialog
+#   deck-trust <project> [--harness claude|codex|grok|pi] open the agent; the user answers its dialog
 #   deck-trust <project> --grant [--yes] [--harness <h>] write the harness's trust record, on the user's yes
 #   deck-trust --all [--grant [--yes]] [--harness <h>]   every registered project the harness doesn't trust yet
 #   deck-trust --path <dir> [--grant] [--harness <h>]    a folder by path (--grant: only a registered project's)
@@ -10,6 +10,9 @@
 #
 # Claude, Codex and Grok all key folder trust on the repository's main checkout,
 # so trusting a project once covers every worker worktree made from it.
+# Pi (~/.pi/agent/trust.json) keys trust by path, the closest saved decision
+# winning, so its trust doesn't reach worktrees under ~/.deck/worktrees. deck
+# uses Pi only as the operator for now, where that doesn't matter.
 #
 # Without --grant, deck opens the agent in that folder and the user answers
 # the dialog themselves:
@@ -25,7 +28,7 @@
 # the file up to <file>.deck-bak before writing, and reads the trust back after.
 . "$(dirname "$0")/deck-lib.sh"
 
-[ $# -gt 0 ] || { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -gt 0 ] || { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 name="" path="" harness="" check=0 grant=0 yes=0 all=0
 while [ $# -gt 0 ]; do
@@ -41,7 +44,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$harness" ] || harness=$(default_harness)
-valid_harness "$harness" || die "unsupported harness: $harness"
+valid_operator_harness "$harness" || die "unsupported harness: $harness"
 # What to suggest for an untrusted project: the grant where deck can write it.
 fix_flag=--grant
 [ "$harness" = grok ] && fix_flag=""
@@ -78,6 +81,7 @@ store_file() {
     claude) printf '%s\n' "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json" ;;
     codex) printf '%s\n' "${CODEX_HOME:-$HOME/.codex}/config.toml" ;;
     grok) printf '%s\n' "${GROK_HOME:-$HOME/.grok}/trusted_folders.toml" ;;
+    pi) printf '%s\n' "${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}/trust.json" ;;
   esac
 }
 
@@ -95,6 +99,14 @@ grant_refusal() { # <path>
       [ -d "$(dirname "$f")" ] || { echo "$(dirname "$f") doesn't exist yet: run codex once first"; return; }
       if [ -f "$f" ] && grep -qF -e "\"$p\"" -e "'$p'" "$f"; then
         echo "$f already has an entry for $p that isn't \"trusted\"; edit it yourself if you want it trusted"; return
+      fi ;;
+    pi)
+      [ -d "$(dirname "$f")" ] || { echo "$(dirname "$f") doesn't exist yet: run pi once first"; return; }
+      if [ -f "$f" ]; then
+        jq -e 'type == "object"' "$f" >/dev/null 2>&1 || { echo "$f isn't the JSON deck expects; leaving it alone"; return; }
+        if jq -e --arg p "$p" 'has($p)' "$f" >/dev/null 2>&1; then
+          echo "$f already has a decision for $p that isn't trusted; change it yourself (/trust in pi) if you want it trusted"; return
+        fi
       fi ;;
     grok)
       echo "deck doesn't know Grok's trusted_folders.toml format well enough to write it; use the dialog instead (bin/deck-trust without --grant)" ;;
@@ -161,6 +173,21 @@ write_codex() { # <path>
   swap_in "$f" "$tmp" "$before"
 }
 
+write_pi() { # <path>
+  local p=$1 f tmp before
+  f=$(store_file)
+  [ -f "$f" ] || { echo '{}' >"$f"; chmod 600 "$f"; }
+  before=$(fingerprint "$f")
+  backup "$f" || return 1
+  tmp=$(mktemp "$f.deck.XXXXXX") || return 1
+  cp -p "$f" "$tmp"
+  jq --arg p "$p" '.[$p] = true' "$f" >"$tmp" || { rm -f "$tmp"; return 1; }
+  # Only that one key may differ.
+  jq -n -e --arg p "$p" --slurpfile a "$f" --slurpfile b "$tmp" '($a[0] | del(.[$p])) == ($b[0] | del(.[$p])) and $b[0][$p] == true' >/dev/null ||
+    { rm -f "$tmp"; warn "the new $f would change more than one key; nothing written"; return 1; }
+  swap_in "$f" "$tmp" "$before"
+}
+
 # Grant one project. 0 granted or already trusted, 1 refused/failed, 2 declined.
 grant_one() { # <name> <path>
   local n=$1 p=$2 why
@@ -172,6 +199,7 @@ grant_one() { # <name> <path>
   case $harness in
     claude) write_claude "$p" ;;
     codex) write_codex "$p" ;;
+    pi) write_pi "$p" ;;
   esac || { warn "$n: writing $(store_file) failed"; return 1; }
   if harness_trusts "$harness" "$p"; then
     echo "$n is trusted by $harness (wrote $(store_file); backup at $(store_file).deck-bak)"; return 0
@@ -236,6 +264,7 @@ quit_hint() {
     claude) echo "type /exit" ;;
     codex) echo "type /quit" ;;
     grok) echo "type /exit" ;;
+    pi) echo "type /quit" ;;
   esac
 }
 
