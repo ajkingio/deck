@@ -60,11 +60,13 @@ persona.md             the Deck's voice, chat only
 CLAUDE.md              @AGENTS.md   (Codex and Grok read AGENTS.md natively)
 DESIGN.md              this file
 .agents/skills/        shared skills; .claude/skills -> ../.agents/skills
+.claude/settings.json  registers the Stop hook (deck-turnend-guard)
 templates/             gig-brief.md, recon-brief.md, worker-system.md
 bin/
   deck-doctor          dependency + environment check
   deck-spawn           worktree + agent start + brief + job record
   deck-wait            block until any worker changes state or appends a status line
+  deck-turnend-guard   Claude Code Stop hook: blocks turn end while jobs are live and no deck-wait runs
   deck-sitrep          snapshot of every job
   deck-forge           gh/glab adapter (see Forges); refuses `open` from a worker
   deck-open            push + open the PR/MR, only on the user's word
@@ -129,7 +131,7 @@ Gotchas baked into the adapter:
 
 ## Supervision per harness
 
-- **Claude Code:** `deck-wait` runs as a background command; Claude is re-invoked when it exits. First-class.
+- **Claude Code:** `deck-wait` runs as a background command; Claude is re-invoked when it exits. First-class. `deck-turnend-guard`, a Stop hook, backs this up: it blocks a turn from ending while jobs are `running`/`blocked` and `state/wait.pid` names no live deck-wait. It allows when `stop_hook_active` is set, after 3 blocks in 10 minutes, on any error, and in linked worktrees or homes without `data/jobs`, so it is inert for workers on deck itself.
 - **Grok:** background notification around `deck-wait`, same shape. Needs verification on a machine with Grok installed.
 - **Codex:** no background re-invocation. v1 uses bounded foreground waits when the user is idle; the user can't chat during a wait. A Stop-hook integration is a later improvement.
 

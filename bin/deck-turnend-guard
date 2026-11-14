@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# deck-turnend-guard: Claude Code Stop hook that keeps the watcher running.
+#
+#   Registered in .claude/settings.json; reads the Stop hook JSON on stdin.
+#
+# If any job is running or blocked and no live deck-wait holds state/wait.pid,
+# it blocks the turn from ending and tells the operator to start the watcher.
+# Otherwise it allows the stop silently.
+#
+# Never fails closed: any error, missing jq, or unreadable input allows the stop.
+# Inert outside the operator's home: in a linked git worktree (a worker on the
+# deck project) or a checkout with no data/jobs it always allows.
+# Loop safety: allows when stop_hook_active is true (at most one block per turn),
+# and allows once DECK_GUARD_BUDGET blocks (default 3) landed in the last
+# DECK_GUARD_WINDOW seconds (default 600).
+
+allow() { exit 0; }
+trap allow ERR
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd -P)" || allow
+jobs="$root/data/jobs"
+state="$root/state"
+
+# Scope: a linked worktree has a .git file, not a directory. Workers there
+# load the same settings.json; they must never be blocked.
+[ -f "$root/.git" ] && allow
+[ -d "$jobs" ] || allow
+
+command -v jq >/dev/null 2>&1 || allow
+input=$(cat 2>/dev/null) || allow
+[ -n "$input" ] || allow
+active=$(printf '%s' "$input" | jq -r '.stop_hook_active // false' 2>/dev/null) || allow
+[ "$active" = false ] || allow
+
+# Live work?
+live=0
+for conf in "$jobs"/*/job.conf; do
+  [ -f "$conf" ] || continue
+  s=$(grep -E '^status=' "$conf" 2>/dev/null | tail -n1 | cut -d= -f2-)
+  case $s in running|blocked) live=$((live + 1)) ;; esac
+done
+
+blocks="$state/turnend-guard.blocks"
+healthy() { rm -f "$blocks" 2>/dev/null; exit 0; }
+[ "$live" -gt 0 ] || healthy
+
+# Watcher alive? deck-wait writes its pid to state/wait.pid and removes it on exit.
+pid=$(cat "$state/wait.pid" 2>/dev/null | tr -cd '0-9')
+if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+  cmd=$(ps -p "$pid" -o command= 2>/dev/null) || cmd=deck-wait
+  case $cmd in *deck-wait*) healthy ;; esac
+fi
+
+# Budget: never nag more than DECK_GUARD_BUDGET times per window.
+budget=${DECK_GUARD_BUDGET:-3} window=${DECK_GUARD_WINDOW:-600}
+case $budget in ''|*[!0-9]*) budget=3 ;; esac
+case $window in ''|*[!0-9]*) window=600 ;; esac
+t=$(date +%s)
+recent=0 kept=""
+if [ -f "$blocks" ]; then
+  while read -r b; do
+    case $b in ''|*[!0-9]*) continue ;; esac
+    if [ $((t - b)) -lt "$window" ]; then recent=$((recent + 1)); kept="$kept$b
+"; fi
+  done <"$blocks"
+fi
+[ "$recent" -ge "$budget" ] && allow
+mkdir -p "$state" 2>/dev/null && printf '%s%s\n' "$kept" "$t" >"$blocks" 2>/dev/null
+
+[ "$live" = 1 ] && what="1 job is" || what="$live jobs are"
+reason="deck: $what running or blocked and no watcher is running. Start bin/deck-wait as a background command with a description starting \"deck-wait:\" (e.g. \"deck-wait: watching the workers\"), then end your turn."
+jq -nc --arg r "$reason" '{decision:"block",reason:$r}' 2>/dev/null || allow
+exit 0
