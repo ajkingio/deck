@@ -7,7 +7,7 @@
 #
 # Events, one per line:  <job-id> <event> <detail>
 #   done | blocked | failed   the worker reported via deck-report
-#   dialog                    Herdr sees the worker stuck at an approval/question UI
+#   dialog                    the multiplexer sees the worker stuck at an approval/question UI
 #   idle                      the worker stopped without reporting
 #   gone                      the worker's agent is no longer running; the job's status
 #                             becomes 'gone' (bin/deck-spawn <id> --relaunch restarts it)
@@ -15,6 +15,10 @@
 #
 # Only one watcher runs per deck home; a second exits 3 with "already watching".
 # Runs a Herdr notification for user-facing events unless config notify=off.
+# Works the same under Rex (bin/deck-mux.sh): there the worker's state is what
+# its harness reported over OSC 7501, read by polling Rex (program_status and
+# the tab's process), and its tab shows that status in Rex's sidebar instead of
+# a notification. Codex and Grok don't report, so for them only gone fires.
 . "$(dirname "$0")/deck-lib.sh"
 
 timeout=0 once=0 interval=${DECK_WAIT_INTERVAL:-5}
@@ -37,11 +41,7 @@ if [ $once = 0 ]; then
   trap 'rm -f "$lock"' EXIT
 fi
 
-notify() { # <title> <body> <sound>
-  [ "$(conf_get "$DECK_CONF" notify on)" = off ] && return 0
-  command -v herdr >/dev/null 2>&1 || return 0
-  herdr notification show "$1" --body "$2" --sound "$3" >/dev/null 2>&1 || true
-}
+notify() { mux_notify "$id" "$@"; }   # $id: the job scan() is on
 
 scan() { # prints events; updates job records
   local id s dir lines seen new ev rest info ast seq flag
@@ -73,10 +73,9 @@ scan() { # prints events; updates job records
 
     [ "$s" = gone ] && continue
 
-    # 2. What Herdr sees.
-    info=$(herdr agent get "$id" 2>/dev/null) || info=""
-    ast=$(printf '%s' "$info" | jq -r '.result.agent.agent_status // empty' 2>/dev/null)
-    seq=$(printf '%s' "$info" | jq -r '.result.agent.state_change_seq // 0' 2>/dev/null)
+    # 2. What the multiplexer sees.
+    info=$(mux_agent_status "$id")
+    ast=${info%% *} seq=${info#* }
     flag=$(job_get "$id" herdr_flag "")
     if [ -z "$ast" ]; then
       job_set "$id" status gone

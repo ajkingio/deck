@@ -88,6 +88,9 @@ await test("scope: operator home only", () => {
   mkdir(join(wt, "data", "jobs"));
   writeFileSync(join(wt, ".git"), "gitdir: /somewhere\n");
   assert.equal(m.isOperatorHome(wt), false, "a linked worktree");
+  mkdir(join(wt, "state"));
+  writeFileSync(join(wt, "state", "operator-home"), "");
+  assert.equal(m.isOperatorHome(wt), true, "a linked worktree marked as a trial operator home");
   const bare = join(scratch, "nojobs");
   mkdir(bare);
   assert.equal(m.isOperatorHome(bare), false, "no data/jobs");

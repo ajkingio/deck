@@ -19,7 +19,9 @@
 # Without --grant, deck opens the agent in that folder and the user answers
 # the dialog themselves:
 #   - inside Herdr: in a focused workspace labelled trust-<name>, closed afterwards
-#   - outside Herdr (./setup): in this terminal; the user quits the agent after
+#   - with mux=rex, inside Rex: in a focused tab labelled trust-<name>, closed
+#     once the harness has recorded the trust (or the user quit it)
+#   - otherwise (./setup): in this terminal; the user quits the agent after
 #
 # --grant writes the harness's own trust record for a registered project's main
 # checkout, and only on the user's explicit word: it asks "Trust ...? [y/N]"
@@ -269,6 +271,28 @@ quit_hint() {
     pi) echo "type /quit" ;;
   esac
 }
+
+# Rex: a focused tab of its own. Every harness's trust is readable on disk, so
+# deck watches that rather than the agent: trusted -> close the tab; the agent
+# exited without it -> the user declined.
+if [ "$(mux_name)" = rex ] && [ -n "${REX_SESSION:-}" ] && rex_bin >/dev/null; then
+  need jq
+  label="trust-$name"
+  exe=$(command -v "$harness")
+  out=$(rexc window new -s "$REX_SESSION" "$label" -c "$path" --keep-open --json -- "$exe" 2>&1) || die "rex window new failed: $out"
+  tab=$(printf '%s' "$out" | jq -r '.window_id // empty') blk=$(printf '%s' "$out" | jq -r '.block_ids[0] // empty')
+  close_tab() { [ "$(rex_window_label "$REX_SESSION" "$tab")" = "$label" ] && rexc window close -s "$REX_SESSION" "$tab" >/dev/null 2>&1; }
+  echo "ACTION FOR THE USER: switch to the Rex tab '$label' and answer $harness's trust dialog for $path."
+  echo "waiting up to 5 minutes..."
+  i=0
+  while [ $i -lt 300 ]; do
+    if harness_trusts "$harness" "$path"; then close_tab; echo "$name is trusted by $harness"; exit 0; fi
+    if ! rex_block_alive "$REX_SESSION" "$blk"; then close_tab; echo "$name was not trusted ($harness exited: the user declined)"; exit 1; fi
+    sleep 1; i=$((i + 1))
+  done
+  echo "still waiting on the trust dialog in tab '$label'; run bin/deck-trust $name --check later"
+  exit 1
+fi
 
 # Outside Herdr: run the agent right here in the foreground.
 if [ "${HERDR_ENV:-}" != 1 ]; then

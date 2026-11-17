@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# deck-teardown: close a job's Herdr workspace and remove its worktree.
+# deck-teardown: close a job's worker space (Herdr workspace or Rex tab) and remove its worktree.
 #
 #   deck-teardown <id>             refuses unless the work has landed
 #   deck-teardown <id> --discard   the user explicitly said to throw this work away
@@ -64,16 +64,9 @@ refusing. --discard would throw this away; only if the user explicitly wants tha
   [ -z "$dirty" ] || die "worktree $wt has uncommitted changes; refusing"
 fi
 
-# Close only the workspace this job created, and only if it still carries our
+# Close only the space this job created, and only if it still carries our
 # label: "└ <id>", or the plain "<id>" used by jobs spawned before grouping.
-if [ -n "$ws" ] && command -v herdr >/dev/null 2>&1; then
-  label=$(herdr workspace list 2>/dev/null | jq -r --arg w "$ws" '.result.workspaces[] | select(.workspace_id == $w) | .label' 2>/dev/null)
-  if [ "$label" = "$(worker_ws_label "$id")" ] || [ "$label" = "$id" ]; then
-    herdr workspace close "$ws" >/dev/null 2>&1 || warn "could not close Herdr workspace $ws"
-  elif [ -n "$label" ]; then
-    warn "workspace $ws is now labelled '$label', not '$(worker_ws_label "$id")'; leaving it open"
-  fi
-fi
+[ -z "$ws" ] || mux_ws_close_if_ours "$id" "$ws"
 
 if [ -d "$wt" ]; then
   if [ $discard = 1 ]; then

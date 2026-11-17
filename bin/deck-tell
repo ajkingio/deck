@@ -9,7 +9,7 @@
 # if one is given. Use it on a worker that is looping or going the wrong way.
 #
 # Refuses if the worker is sitting at an approval/question dialog; inspect it with
-# `herdr agent read <id> --source recent-unwrapped --lines 80` and ask the user.
+# bin/deck-peek <id> and ask the user. Works under Herdr and Rex alike.
 #
 # Once a message is delivered, a job that was waiting on the operator goes back to
 # 'running' so bin/deck-wait watches it again: blocked (an answer), review (changes
@@ -24,7 +24,7 @@ interrupt=0
 [ "${1:-}" = --interrupt ] && { interrupt=1; shift; }
 msg="$*"
 [ -n "$msg" ] || [ $interrupt = 1 ] || die "usage: deck-tell <id> \"<message>\"  or  deck-tell <id> --interrupt [\"<message>\"]"
-need herdr; need jq
+need jq
 
 # The key that cancels a running turn without quitting the harness.
 interrupt_key() { # <harness>
@@ -38,28 +38,27 @@ interrupt_key() { # <harness>
 if [ $interrupt = 1 ]; then
   harness=$(job_get "$id" harness)
   key=$(interrupt_key "$harness") || die "no known interrupt key for harness '$harness'; refusing to guess"
-  ast=$(herdr agent get "$id" 2>/dev/null | jq -r '.result.agent.agent_status // empty' 2>/dev/null)
-  [ -n "$ast" ] || die "worker $id has no live agent in Herdr; relaunch it with: bin/deck-spawn $id --relaunch"
-  [ "$ast" != blocked ] || die "worker $id is at a dialog, and $key could answer it; read it with: herdr agent read $id --source recent-unwrapped --lines 80"
+  ast=$(mux_agent_status "$id"); ast=${ast%% *}
+  [ -n "$ast" ] || die "worker $id has no live agent in $(mux_title "$(job_mux "$id")"); relaunch it with: bin/deck-spawn $id --relaunch"
+  [ "$ast" != blocked ] || die "worker $id is at a dialog, and $key could answer it; read it with: $(mux_read_hint "$id")"
   case $ast in
     idle|done)
       # Nothing to cancel, and grok's Ctrl+C on an idle prompt can quit it.
       echo "worker $id is $ast, not mid-turn; no interrupt sent"
       interrupt=0 ;;
     *)
-      out=$(herdr agent send-keys "$id" "$key" 2>&1) || die "could not send $key to worker $id: $out"
+      out=$(mux_agent_send_key "$id" "$key" 2>&1) || die "could not send $key to worker $id: $out"
       printf '%s [interrupt]\n' "$(now)" >>"$(job_dir "$id")/messages.log"
       sleep "${DECK_INTERRUPT_SETTLE:-1}" ;;  # let the harness return to its prompt
   esac
   if [ -z "$msg" ]; then [ $interrupt = 0 ] || echo "interrupted $id"; exit 0; fi
 fi
 
-out=$(herdr agent prompt "$id" "Message from deck: $msg" --wait --timeout 15000 2>&1)
-rc=$?
-code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
+mux_agent_prompt "$id" "Message from deck: $msg" 15000
+rc=$? code=$MUX_ERR out=$MUX_OUT
 case "$rc:$code" in
   0:|*:timeout) ;;
-  *:agent_blocked) die "worker $id is at a dialog; read it with: herdr agent read $id --source recent-unwrapped --lines 80" ;;
+  *:agent_blocked) die "worker $id is at a dialog; read it with: $(mux_read_hint "$id")" ;;
   *) die "could not reach worker $id ($code): $out" ;;
 esac
 printf '%s %s\n' "$(now)" "$msg" >>"$(job_dir "$id")/messages.log"
