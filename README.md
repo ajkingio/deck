@@ -12,7 +12,7 @@ The plan for Pi and local models is in [`ROADMAP.md`](ROADMAP.md).
 
 ## Requirements
 
-- [Herdr](https://herdr.dev) 0.9 or newer
+- [Herdr](https://herdr.dev) 0.9 or newer (the default), or [Rex](https://www.superlogical.com/rex) (API revision 13 or newer); see [Choosing a multiplexer](#choosing-a-multiplexer)
 - One of: [Claude Code](https://claude.com/claude-code), [Codex](https://github.com/openai/codex), Grok, Pi
 - `git` and `jq`
 - For PRs: `gh` (GitHub) and/or `glab` (GitLab, including self-hosted), logged in
@@ -47,6 +47,20 @@ Then just ask:
 ```
 
 Each daemon shows up as its own Herdr workspace, labelled `└ <job>` and grouped right under the Deck's, so you can watch any of them or step in.
+
+## Choosing a multiplexer
+
+deck drives its daemons through a terminal multiplexer. Herdr is the default. Rex works too: set `mux=rex` in `config/deck.conf` (setup asks when Rex is installed), or `DECK_MUX=rex` for one shell. Each job keeps the multiplexer it was spawned under, so switching never strands a live daemon.
+
+Under Rex:
+
+- Run your agent in a Rex tab (or `jackin` from one, which opens a `deck` tab). Daemons open as tabs labelled `└ <job>` in the same Rex session, right after the Deck's tab.
+- Daemon state comes from the agent itself: Claude Code and Pi report working, waiting on you (permission or question) and done to Rex with the [Program Status Protocol](https://www.superlogical.com/rex/docs/build/program-status), Rex shows it in its sidebar, and deck's watcher reads it. There are no Herdr notifications. Codex and Grok don't report, so for them deck only sees whether they're still running.
+- `bin/deck-peek <job>` reads a daemon's screen (it works under Herdr too). A daemon's tab stays open after its agent exits, so you can read how it ended.
+- deck finds `rex` on your `PATH`, else in the Rex app (`/Applications/Rex Beta.app`); set `rex_bin=` to point elsewhere. Outside Rex, set `rex_session=` to the session daemons should open in.
+- If your Claude Code doesn't report its status to Rex, `rex_claude_hooks=on` makes deck pass its workers hooks that report it instead (`templates/rex-claude-hooks.json`, `bin/deck-rex-status`). Your own `~/.claude/settings.json` is never edited.
+
+**Trying a branch of deck itself.** `bin/deck-trial [--mux rex|herdr]`, run in a worktree of deck, makes it a separate operator home: it copies your main deck's config (with the chosen multiplexer and its own session name, `deck-trial`), profile, engrams and projects, but none of its jobs. Run your agent there to try the branch; the trial's jobs, watcher and worker worktrees stay apart from your main deck's. Use job ids your main deck isn't using, since both create `deck/<id>` branches in the same project repos.
 
 ## Commands
 
@@ -140,7 +154,7 @@ Workers run unattended, so they launch with autonomy turned on, inside their own
 **Folder trust.** Each harness asks once whether you trust a repository, and a worker can't answer that. Claude Code, Codex and Grok key trust on the main checkout, so trusting a project once covers every worker worktree. Pi keys trust by path, so its trust doesn't reach worktrees; deck still trusts only the main checkout, and starts a Pi worker with `--approve` (trust for that run only, nothing written) when the checkout is trusted. Two ways to trust a project:
 
 - `bin/deck-trust <project> --grant` writes the harness's own trust record for that project (Claude, Codex and Pi; it backs the file up first and never overrides a decision already recorded there). It asks "Trust <project> (<path>) for <harness>? [y/N]" for each one; `--all` walks every registered project that isn't trusted yet. To run it yourself from Claude Code, use `! bin/deck-trust <project> --grant --yes`.
-- `bin/deck-trust <project>` opens your worker's agent in it, in a Herdr workspace named `trust-<project>`, and you answer the dialog yourself.
+- `bin/deck-trust <project>` opens your worker's agent in it, in a Herdr workspace (or Rex tab) named `trust-<project>`, and you answer the dialog yourself.
 
 deck edits your harness's trust config only on your explicit word, per project: setup asks, or you name the project to the Deck. It never presses keys on a trust dialog.
 
@@ -177,11 +191,11 @@ bin/deck-test land local_refuses_dirty_checkout   # one test
 bin/deck-test --list                         # what's there
 ```
 
-Each test runs in a throwaway sandbox (`tests/lib.sh`): a temp HOME, a temp deck home with copies of `bin/` and `templates/`, small git repos as projects, and stubs for `herdr`, `gh`, `glab` and `claude` that log their calls. It never touches your `~/.deck`, your Herdr session, your config or the network. A known bug is marked `xfail` until its fix lands; the run fails only on `FAIL`.
+Each test runs in a throwaway sandbox (`tests/lib.sh`): a temp HOME, a temp deck home with copies of `bin/` and `templates/`, small git repos as projects, and stubs for `herdr`, `rex`, `gh`, `glab` and `claude` that log their calls. It never touches your `~/.deck`, your Herdr or Rex session, your config or the network. A known bug is marked `xfail` until its fix lands; the run fails only on `FAIL`.
 
 ## Status
 
-Early. Claude Code has been tested end to end with Herdr 0.9.5 (as fixer, before the rename). Codex and Grok follow the same design but haven't been tested yet; see `DESIGN.md`.
+Early. Claude Code has been tested end to end with Herdr 0.9.5 (as fixer, before the rename). The Rex backend was checked live against Rex 0.1.0-preview.15 with Claude Code 2.1 and Pi 1.5. Codex and Grok follow the same design but haven't been tested yet; see `DESIGN.md`.
 
 ## License
 

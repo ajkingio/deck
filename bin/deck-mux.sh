@@ -20,8 +20,8 @@
 # done / idle themselves, and Rex keeps the latest report per terminal
 # (block method program_status), dropping it when the reporting process exits.
 # Codex and Grok don't report, so for them deck sees only whether the process
-# is alive. The rex binary: config rex_bin, else `rex` on PATH, else the one in
-# the Rex app bundle.
+# is alive. The rex binary: config rex_bin, else `rex` on PATH, else
+# $REX_BIN_DIR/rex (set inside Rex terminals), else the one in the Rex app bundle.
 
 DECK_MUXES="herdr rex"
 DECK_REX_APP_BIN=${DECK_REX_APP_BIN:-"/Applications/Rex Beta.app/Contents/Helpers/Rex Server.rex/Contents/MacOS/rex"}
@@ -55,6 +55,8 @@ rex_bin() {
   local b
   b=$(conf_get "$DECK_CONF" rex_bin "")
   [ -n "$b" ] || b=$(command -v rex 2>/dev/null) || b=""
+  # Programs in Rex terminals get REX_BIN_DIR, where the running server's rex lives.
+  [ -n "$b" ] || { [ -n "${REX_BIN_DIR:-}" ] && [ -x "$REX_BIN_DIR/rex" ] && b=$REX_BIN_DIR/rex; }
   [ -n "$b" ] || { [ -x "$DECK_REX_APP_BIN" ] && b=$DECK_REX_APP_BIN; }
   [ -n "$b" ] || return 1
   printf '%s\n' "$b"

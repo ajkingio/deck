@@ -105,6 +105,7 @@ case "${1:-} ${2:-}" in
       printf '{"error":{"code":"%s"}}\n' "$(cat "$STUB_DIR/herdr/prompt-fails")"; exit 1
     fi ;;
   "notification show") ;;
+  "agent read") [ -f "$a/$3" ] || { echo '{"error":{"code":"agent_not_found"}}'; exit 1; }; echo "herdr screen of $3" ;;
   "pane get")
     # $STUB_DIR/herdr/panes/<pane> holds that pane's workspace id; others are the operator's.
     w=ws-operator

@@ -303,6 +303,24 @@ test_peek_reads_tab() {
   expect_called "rex capture -s session:op -b block:1 --trim --unwrap"
 }
 
+test_peek_under_herdr() {
+  ready_job
+  export HERDR_ENV=1
+  run spawn app-job; expect_ok "spawn"
+  run peek app-job --lines 5; expect_ok "peek"
+  expect_eq "$OUT" "herdr screen of app-job" "peek"
+  expect_called "herdr agent read app-job --source recent-unwrapped --lines 5"
+}
+
+test_rex_found_via_rex_bin_dir() {
+  use_rex
+  mkdir -p "$T/rexapp"
+  mv "$T/stubs/rex" "$T/rexapp/rex"
+  export REX_BIN_DIR="$T/rexapp"
+  run doctor
+  expect_out "OK    rex 0.1.0-preview.15 (API revision 13), server running"
+}
+
 test_sitrep_shows_rex_state() {
   spawned_job
   rex_state app-job working

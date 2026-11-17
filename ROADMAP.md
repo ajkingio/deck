@@ -2,13 +2,13 @@
 
 This is the working plan for running deck on Pi and on locally served models. It is self-contained: a fresh operator on another machine (for example the Mac mini `tempo`) can read it and pick up the work without the MacBook's private `data/`.
 
-Last updated: 2026-11-13.
+Last updated: 2026-11-16.
 
 ## Goal
 
 Make Pi a first-class harness in deck alongside Claude Code. Then add a `local` profile where the operator and workers run Pi against models served from the user's Mac mini (`tempo`) over Tailscale, with web search and other needed tools added to Pi.
 
-Herdr stays the multiplexer until Rex is out of beta. Rex comes later, behind an adapter.
+Herdr stays the default multiplexer. Rex is available as an alternative (`mux=rex`) behind the same adapter.
 
 ## Done (on `main`)
 
@@ -59,9 +59,9 @@ A config profile with:
 
 Per-job `--harness claude` stays available for hard gigs.
 
-### 5. Later: multiplexer adapter, then Rex
+### 5. Multiplexer adapter and Rex: built, on trial
 
-Put every Herdr call in `deck-lib.sh` behind `mux_*` functions, then add a Rex adapter once Rex leaves beta.
+Every Herdr call is behind `mux_*` functions in `bin/deck-mux.sh`, with a Herdr backend (unchanged behaviour) and a Rex backend. Choose with `mux=herdr|rex` in `config/deck.conf` (default `herdr`) or `DECK_MUX`; each job records its mux. Under Rex, workers are tabs `└ <id>` in the operator's Rex session, and their state is the OSC 7501 program status that Claude Code and Pi report natively (an opt-in hook fallback exists for Claude Code: `rex_claude_hooks=on`). `bin/deck-trial` seeds a worktree as a separate operator home to try it. Remaining: a real Rex trial with a Claude operator; whether to make Rex the default once Rex leaves beta.
 
 ## Facts and constraints
 
@@ -82,7 +82,7 @@ Put every Herdr call in `deck-lib.sh` behind `mux_*` functions, then add a Rex a
 - Whether to tighten the bash write guard: block any non-read-only bash command that mentions a protected path.
 - Whether Pi workers get a tool_call guard that blocks writes outside their worktree and job dir (Pi workers have no approvals or sandbox).
 - Which connectors are worth setting up in Pi.
-- When to move to Rex.
+- Whether to make Rex the default multiplexer, after a real trial.
 
 ## Picking this up on tempo
 
