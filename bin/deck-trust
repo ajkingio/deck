@@ -41,7 +41,7 @@
 # trust the folder, never touches other keys, and refuses for Grok.
 . "$(dirname "$0")/deck-lib.sh"
 
-[ $# -gt 0 ] || { sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -gt 0 ] || { sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 name="" path="" harness="" check=0 grant=0 revoke=0 yes=0 all=0
 while [ $# -gt 0 ]; do
