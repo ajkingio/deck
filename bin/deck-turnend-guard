@@ -9,7 +9,8 @@
 #
 # Never fails closed: any error, missing jq, or unreadable input allows the stop.
 # Inert outside the operator's home: in a linked git worktree (a worker on the
-# deck project) or a checkout with no data/jobs it always allows.
+# deck project) unless state/operator-home marks it as one (bin/deck-trial), or
+# in a checkout with no data/jobs, it always allows.
 # Loop safety: allows when stop_hook_active is true (at most one block per turn),
 # and allows once DECK_GUARD_BUDGET blocks (default 3) landed in the last
 # DECK_GUARD_WINDOW seconds (default 600).
@@ -22,8 +23,10 @@ jobs="$root/data/jobs"
 state="$root/state"
 
 # Scope: a linked worktree has a .git file, not a directory. Workers there
-# load the same settings.json; they must never be blocked.
-[ -f "$root/.git" ] && allow
+# load the same settings.json; they must never be blocked. The exception is a
+# trial operator home made by bin/deck-trial, marked by state/operator-home
+# (state/ is private, so a worker's fresh worktree never has it).
+[ -f "$root/.git" ] && [ ! -f "$state/operator-home" ] && allow
 [ -d "$jobs" ] || allow
 
 command -v jq >/dev/null 2>&1 || allow

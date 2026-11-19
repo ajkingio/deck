@@ -26,7 +26,8 @@
 //
 // Scope: active only in the operator's home, the same rule as
 // bin/deck-turnend-guard: the deck checkout must not be a linked git worktree
-// (.git is a file there) and must have data/jobs. Workers on the deck project
+// (.git is a file there), unless state/operator-home marks a trial home made
+// by bin/deck-trial, and must have data/jobs. Workers on the deck project
 // run in worktrees and may load this file; there it does nothing.
 //
 // Fails open on its own errors (logged to state/pi-operator.log), except the
@@ -50,11 +51,12 @@ export function deckRootFromFile(file: string): string {
   return resolve(dirname(file), "..", "..");
 }
 
-/** The operator's home: not a linked git worktree, and data/jobs exists. */
+/** The operator's home: data/jobs exists, and it is not a linked git worktree
+ *  unless state/operator-home marks it as a trial home (bin/deck-trial). */
 export function isOperatorHome(root: string): boolean {
   try {
     const git = join(root, ".git");
-    if (existsSync(git) && statSync(git).isFile()) return false;
+    if (existsSync(git) && statSync(git).isFile() && !existsSync(join(root, "state", "operator-home"))) return false;
     return existsSync(join(root, "data", "jobs")) && statSync(join(root, "data", "jobs")).isDirectory();
   } catch {
     return false;
