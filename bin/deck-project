@@ -4,9 +4,17 @@
 #   deck-project add <git-url|local-path> [--name <n>] [--mode pr|local] [--base <branch>] [--forge github|gitlab]
 #   deck-project list
 #   deck-project show <name>
+#   deck-project remove <name>
 #
 # A git URL is cloned into projects/<name>. A local path is used in place.
 # Project records live in data/projects/<name>.conf.
+#
+# `remove` deregisters a project: it deletes data/projects/<name>.conf and
+# nothing else. It refuses while any job for the project is unfinished (not
+# landed, closed or cancelled), and refuses to remove deck itself. The
+# project's files stay on disk, including a clone under projects/<name>; it
+# prints that path so the user decides. Folder trust is separate: undo it with
+# bin/deck-trust <name> --revoke (or --path <dir> --revoke once removed).
 . "$(dirname "$0")/deck-lib.sh"
 
 cmd=${1:-}; shift || true
@@ -77,8 +85,28 @@ show)
   require_project "${1:-}"
   cat "$(project_conf "$1")"
   ;;
+remove)
+  name=${1:-}
+  [ -n "$name" ] && [ $# -eq 1 ] || die "usage: deck-project remove <name>"
+  require_project "$name"
+  path=$(project_get "$name" path)
+  [ "$name" != deck ] && [ "$path" != "$DECK_ROOT" ] || die "$name is deck itself; refusing to deregister it"
+  open=""
+  for id in $(job_ids); do
+    [ "$(job_get "$id" project)" = "$name" ] || continue
+    st=$(job_get "$id" status)
+    case $st in landed|closed|cancelled) ;; *) open="$open $id($st)" ;; esac
+  done
+  [ -z "$open" ] || die "project $name has unfinished jobs:$open; land or tear them down first"
+  trusted=""
+  for h in $DECK_HARNESSES; do harness_trusts "$h" "$path" && trusted="$trusted $h"; done
+  rm -f "$(project_conf "$name")"
+  echo "removed $name from deck's projects; its files are untouched at $path"
+  case $path in "$DECK_ROOT/projects/"*) echo "deck cloned it there; delete $path yourself if you no longer want it" ;; esac
+  [ -z "$trusted" ] || echo "still trusted by:$trusted (deck-trust --path $path --revoke --harness <h> removes that)"
+  ;;
 *)
-  sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
   ;;
 esac
