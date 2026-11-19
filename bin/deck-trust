@@ -6,6 +6,8 @@
 #   deck-trust <project> --grant [--yes] [--harness <h>] write the harness's trust record, on the user's yes
 #   deck-trust --all [--grant [--yes]] [--harness <h>]   every registered project the harness doesn't trust yet
 #   deck-trust --path <dir> [--grant] [--harness <h>]    a folder by path (--grant: only a registered project's)
+#   deck-trust <project> --revoke [--yes] [--harness <h>] remove the trust record --grant writes, on the user's yes
+#   deck-trust --path <dir> --revoke [--yes] [--harness <h>]  the same for a folder (registered or not)
 #   add --check to report only and change nothing
 #
 # Claude, Codex and Grok all key folder trust on the repository's main checkout,
@@ -28,17 +30,25 @@
 # It refuses with no terminal and no --yes. It never changes a record the
 # harness already holds for that path (such as an "untrusted" decision), backs
 # the file up to <file>.deck-bak before writing, and reads the trust back after.
+#
+# --revoke is the mirror image, with the same consent rule, backup and atomic
+# write: Claude loses the hasTrustDialogAccepted key in that folder's entry
+# (the entry goes too if nothing else is left in it), Codex the trust_level
+# line of that [projects."<path>"] table (the table goes too if it's left
+# empty), Pi that path's key. It changes nothing when the harness doesn't
+# trust the folder, never touches other keys, and refuses for Grok.
 . "$(dirname "$0")/deck-lib.sh"
 
-[ $# -gt 0 ] || { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ $# -gt 0 ] || { sed -n '2,39p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
-name="" path="" harness="" check=0 grant=0 yes=0 all=0
+name="" path="" harness="" check=0 grant=0 revoke=0 yes=0 all=0
 while [ $# -gt 0 ]; do
   case $1 in
     --path) path=$2; shift 2 ;;
     --harness) harness=$2; shift 2 ;;
     --check) check=1; shift ;;
     --grant) grant=1; shift ;;
+    --revoke) revoke=1; shift ;;
     --yes) yes=1; shift ;;
     --all) all=1; shift ;;
     -*) die "unknown option: $1" ;;
@@ -51,9 +61,11 @@ valid_operator_harness "$harness" || die "unsupported harness: $harness"
 fix_flag=--grant
 [ "$harness" = grok ] && fix_flag=""
 [ $check = 1 ] && [ $grant = 1 ] && die "--check and --grant don't mix"
-[ $yes = 1 ] && [ $grant = 0 ] && die "--yes only goes with --grant"
+[ $grant = 1 ] && [ $revoke = 1 ] && die "--grant and --revoke don't mix"
+[ $yes = 1 ] && [ $grant = 0 ] && [ $revoke = 0 ] && die "--yes only goes with --grant or --revoke"
 if [ $all = 1 ]; then
   [ -z "$name" ] && [ -z "$path" ] || die "--all takes no project or --path"
+  [ $revoke = 0 ] || die "--revoke takes one project or --path, not --all"
 fi
 
 # ---------------------------------------------------------------- grant helpers
@@ -118,7 +130,11 @@ grant_refusal() { # <path>
 consent() { # <name> <path>
   local r
   [ $yes = 1 ] && return 0
-  printf 'Trust %s (%s) for %s? [y/N] ' "$1" "$2" "$harness" >/dev/tty
+  if [ $revoke = 1 ]; then
+    printf 'Revoke trust in %s (%s) for %s? [y/N] ' "$1" "$2" "$harness" >/dev/tty
+  else
+    printf 'Trust %s (%s) for %s? [y/N] ' "$1" "$2" "$harness" >/dev/tty
+  fi
   read -r r </dev/tty || r=""
   case $r in y|Y|yes|Yes) return 0 ;; esac
   return 1
@@ -211,9 +227,110 @@ grant_one() { # <name> <path>
 }
 
 need_consent_channel() {
+  local flag=--grant
+  [ $revoke = 1 ] && flag=--revoke
   [ $yes = 1 ] && return 0
   if [ -t 0 ] && { : </dev/tty; } 2>/dev/null; then return 0; fi
-  die "--grant needs the user's yes: run it yourself in a terminal, or with --yes (in Claude Code: ! bin/deck-trust ... --grant --yes)"
+  die "$flag needs the user's yes: run it yourself in a terminal, or with --yes (in Claude Code: ! bin/deck-trust ... $flag --yes)"
+}
+
+# ---------------------------------------------------------------- revoke helpers
+
+# Why <path>'s trust can't be revoked for this harness; empty output means it can.
+# Called only when harness_trusts says the harness trusts <path>.
+revoke_refusal() { # <path>
+  local p=$1 f
+  f=$(store_file)
+  case $p in *'"'*|*\\*|*"'"*) echo "its path has a quote or backslash, which deck won't edit in $harness's config"; return ;; esac
+  case $harness in
+    claude)
+      jq -e 'type == "object" and ((.projects // {}) | type == "object")' "$f" >/dev/null 2>&1 ||
+        { echo "$f isn't the JSON deck expects; leaving it alone"; return; } ;;
+    pi)
+      jq -e --arg p "$p" 'type == "object" and .[$p] == true' "$f" >/dev/null 2>&1 ||
+        { echo "pi trusts it through a parent folder's record in $f, not one for $p; change that yourself (/trust in pi)"; return; } ;;
+    grok)
+      echo "deck doesn't know Grok's trusted_folders.toml format well enough to edit it; remove the entry yourself" ;;
+  esac
+}
+
+unwrite_claude() { # <path>
+  local p=$1 f tmp before
+  f=$(store_file)
+  before=$(fingerprint "$f")
+  backup "$f" || return 1
+  tmp=$(mktemp "$f.deck.XXXXXX") || return 1
+  cp -p "$f" "$tmp"
+  jq --arg p "$p" '.projects[$p] |= del(.hasTrustDialogAccepted) | if .projects[$p] == {} then del(.projects[$p]) else . end' "$f" >"$tmp" ||
+    { rm -f "$tmp"; return 1; }
+  # Only that one key (and an entry it leaves empty) may differ.
+  jq -n -e --arg p "$p" --slurpfile a "$f" --slurpfile b "$tmp" '
+    def strip: if .projects[$p] then .projects[$p] |= del(.hasTrustDialogAccepted) else . end
+               | if .projects[$p] == {} then del(.projects[$p]) else . end;
+    ($a[0] | strip) == $b[0]' >/dev/null ||
+    { rm -f "$tmp"; warn "the new $f would change more than the trust key; nothing written"; return 1; }
+  swap_in "$f" "$tmp" "$before"
+}
+
+unwrite_codex() { # <path>
+  local p=$1 f tmp before
+  f=$(store_file)
+  before=$(fingerprint "$f")
+  backup "$f" || return 1
+  tmp=$(mktemp "$f.deck.XXXXXX") || return 1
+  cp -p "$f" "$tmp"
+  # Drop trust_level = "trusted" from the [projects."<path>"] table. If that
+  # leaves the table with only blank lines, drop its header too, and the one
+  # blank line before it that --grant adds.
+  awk -v h="[projects.\"$p\"]" '
+    { line[NR] = $0 }
+    END {
+      for (i = 1; i <= NR; i++) {
+        if (line[i] != h) continue
+        e = NR
+        for (j = i + 1; j <= NR; j++) if (line[j] ~ /^[ \t]*\[/) { e = j - 1; break }
+        empty = 1
+        for (j = i + 1; j <= e; j++) {
+          if (line[j] ~ /^[ \t]*trust_level[ \t]*=[ \t]*"trusted"[ \t]*$/) drop[j] = 1
+          else if (line[j] !~ /^[ \t]*$/) empty = 0
+        }
+        if (empty) { drop[i] = 1; if (i > 1 && line[i - 1] ~ /^[ \t]*$/) drop[i - 1] = 1 }
+      }
+      for (i = 1; i <= NR; i++) if (!(i in drop)) print line[i]
+    }' "$f" >"$tmp" || { rm -f "$tmp"; return 1; }
+  swap_in "$f" "$tmp" "$before"
+}
+
+unwrite_pi() { # <path>
+  local p=$1 f tmp before
+  f=$(store_file)
+  before=$(fingerprint "$f")
+  backup "$f" || return 1
+  tmp=$(mktemp "$f.deck.XXXXXX") || return 1
+  cp -p "$f" "$tmp"
+  jq --arg p "$p" 'del(.[$p])' "$f" >"$tmp" || { rm -f "$tmp"; return 1; }
+  jq -n -e --arg p "$p" --slurpfile a "$f" --slurpfile b "$tmp" '($a[0] | del(.[$p])) == $b[0]' >/dev/null ||
+    { rm -f "$tmp"; warn "the new $f would change more than one key; nothing written"; return 1; }
+  swap_in "$f" "$tmp" "$before"
+}
+
+# Revoke one folder. 0 revoked or not trusted, 1 refused/failed, 2 declined.
+revoke_one() { # <name> <path>
+  local n=$1 p=$2 why
+  if ! harness_trusts "$harness" "$p"; then echo "$n is not trusted by $harness; nothing to revoke"; return 0; fi
+  why=$(revoke_refusal "$p")
+  [ -z "$why" ] || { warn "$n: not revoking: $why"; return 1; }
+  consent "$n" "$p" || { echo "$n: still trusted (you said no)"; return 2; }
+  case $harness in
+    claude) unwrite_claude "$p" ;;
+    codex) unwrite_codex "$p" ;;
+    pi) unwrite_pi "$p" ;;
+  esac || { warn "$n: writing $(store_file) failed"; return 1; }
+  if ! harness_trusts "$harness" "$p"; then
+    echo "$n is no longer trusted by $harness (wrote $(store_file); backup at $(store_file).deck-bak)"; return 0
+  fi
+  warn "$n: wrote $(store_file) but $harness still reads it as trusted; check it, or restore from $(store_file).deck-bak"
+  return 1
 }
 
 # ---------------------------------------------------------------- --all
@@ -250,6 +367,18 @@ if [ $grant = 1 ]; then
   [ "$(project_at "$path" || true)" = "$name" ] || die "$path is not a registered project's checkout; --grant only trusts registered projects"
   if ! harness_trusts "$harness" "$path"; then need_consent_channel; fi
   grant_one "$name" "$path"; rc=$?
+  [ $rc = 2 ] && rc=1
+  exit $rc
+fi
+
+if [ $revoke = 1 ]; then
+  need jq
+  if [ $check = 1 ]; then
+    if harness_trusts "$harness" "$path"; then echo "$name is trusted by $harness (--revoke would remove it)"; exit 0; fi
+    echo "$name is not trusted by $harness; nothing to revoke"; exit 1
+  fi
+  if harness_trusts "$harness" "$path"; then need_consent_channel; fi
+  revoke_one "$name" "$path"; rc=$?
   [ $rc = 2 ] && rc=1
   exit $rc
 fi
