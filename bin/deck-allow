@@ -36,6 +36,7 @@ rules='[
   "Bash(bin/deck-spawn:*)",
   "Bash(bin/deck-tell:*)",
   "Bash(bin/deck-wait:*)",
+  "Bash(bin/deck-peek:*)",
   "Bash(herdr agent get:*)",
   "Bash(herdr agent list:*)",
   "Bash(herdr agent read:*)",

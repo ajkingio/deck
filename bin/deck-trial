@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# deck-trial: turn a checkout of deck (usually a worktree with an unmerged
+# branch) into a separate operator home, to try a change with a real operator
+# without touching your main deck.
+#
+#   deck-trial [--mux herdr|rex] [--from <deck-home>] [--force]
+#
+# config/, data/ and state/ are private (gitignored), so a fresh worktree has
+# none. This seeds them, copying from <deck-home> (default: the main checkout
+# of this repository) only what an operator needs to start:
+#   config/deck.conf      with mux=<mux> (default rex), onboarded=yes, and its
+#                         own Herdr/Rex session name, deck-trial
+#   data/profile.md, data/engrams/, data/projects/*.conf
+# and never jobs, proposals or state. It marks the home with
+# state/operator-home, so the Stop-hook guard and the Pi extension treat this
+# linked worktree as an operator home.
+#
+# What stays separate from the main deck: jobs and their records (data/jobs),
+# the watcher (state/), worker worktrees (~/.deck/worktrees/<this dir>-<hash>),
+# and the Herdr session (deck-trial). Shared: the project repositories, so a
+# trial job's branch deck/<id> lives beside the main deck's; use job ids the
+# main deck isn't using (deck-spawn fails if the branch already exists).
+#
+# Refuses if this home already has config/deck.conf, unless --force (which
+# rewrites config/deck.conf and the copied data, and keeps data/jobs).
+. "$(dirname "$0")/deck-lib.sh"
+
+mux=rex from="" force=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --mux) [ $# -ge 2 ] || die "--mux needs a value"; mux=$2; shift 2 ;;
+    --from) [ $# -ge 2 ] || die "--from needs a value"; from=$2; shift 2 ;;
+    --force) force=1; shift ;;
+    -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+valid_mux "$mux" || die "unknown multiplexer '$mux': use one of $DECK_MUXES"
+need git
+
+if [ -z "$from" ]; then
+  from=$(git -C "$DECK_ROOT" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')
+  [ -n "$from" ] || die "can't find this repository's main checkout; pass --from <deck-home>"
+fi
+from=$(cd "$from" 2>/dev/null && pwd -P) || die "no such directory: $from"
+[ "$from" != "$DECK_ROOT" ] || die "$DECK_ROOT is the deck home to copy from; run deck-trial in another checkout (a worktree of this repo)"
+[ -f "$from/config/deck.conf" ] || die "$from has no config/deck.conf to start from (run ./setup there first, or pass --from)"
+if [ -f "$DECK_ROOT/config/deck.conf" ] && [ $force = 0 ]; then
+  die "$DECK_ROOT already has config/deck.conf; rerun with --force to reseed it (data/jobs is kept)"
+fi
+
+mkdir -p "$DECK_ROOT/config" "$DECK_DATA/jobs" "$DECK_PROJECTS" "$DECK_STATE"
+cp "$from/config/deck.conf" "$DECK_ROOT/config/deck.conf"
+conf_set "$DECK_CONF" mux "$mux"
+conf_set "$DECK_CONF" onboarded yes
+conf_set "$DECK_CONF" herdr_session deck-trial
+conf_set "$DECK_CONF" rex_session deck-trial
+[ ! -f "$from/data/profile.md" ] || cp "$from/data/profile.md" "$DECK_DATA/profile.md"
+if [ -d "$from/data/engrams" ]; then
+  mkdir -p "$DECK_DATA/engrams"
+  cp "$from/data/engrams/"*.md "$DECK_DATA/engrams/" 2>/dev/null || true
+fi
+n=0
+for f in "$from/data/projects/"*.conf; do
+  [ -f "$f" ] || continue
+  cp "$f" "$DECK_PROJECTS/"
+  n=$((n + 1))
+done
+: >"$DECK_STATE/operator-home"
+
+echo "seeded a trial deck home in $DECK_ROOT from $from"
+echo "  mux=$mux, $n project(s), Herdr/Rex session name deck-trial, worker worktrees under $(worktree_root)"
+case $mux in
+  rex) echo "next: in a Rex tab, cd $DECK_ROOT and run your agent there (or bin/deck-launch to open a 'deck' tab)" ;;
+  herdr) echo "next: bin/deck-launch (starts the Herdr session 'deck-trial'), or run herdr here and your agent inside it" ;;
+esac

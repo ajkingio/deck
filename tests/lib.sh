@@ -6,9 +6,9 @@
 #   $T        the sandbox root (a temp dir, removed afterwards)
 #   $DECK     a deck home: copies of the repo's bin/ and templates/, empty config/ data/ state/
 #   HOME      $T/home, with its own .gitconfig
-#   PATH      $T/stubs (herdr, gh, glab, claude) + $T/tools (git, jq, and node if installed) + the system dirs
+#   PATH      $T/stubs (herdr, rex, gh, glab, claude) + $T/tools (git, jq, and node if installed) + the system dirs
 # The stubs return canned output and append each call to $T/calls.log. Nothing
-# reaches the real ~/.deck, the real Herdr session, the user's config, or the network.
+# reaches the real ~/.deck, the real Herdr or Rex session, the user's config, or the network.
 
 set -u
 
@@ -19,16 +19,16 @@ DECK_SRC=${DECK_TEST_SRC:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)}
 sandbox() {
   local v tool
   # Forget anything that could point at the real deck, Herdr, harness or git config.
-  for v in $(env | sed -n 's/^\(HERDR_[A-Za-z0-9_]*\)=.*/\1/p; s/^\(DECK_[A-Za-z0-9_]*\)=.*/\1/p; s/^\(FIXER_[A-Za-z0-9_]*\)=.*/\1/p; s/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p'); do
+  for v in $(env | sed -n 's/^\(HERDR_[A-Za-z0-9_]*\)=.*/\1/p; s/^\(REX_[A-Za-z0-9_]*\)=.*/\1/p; s/^\(DECK_[A-Za-z0-9_]*\)=.*/\1/p; s/^\(FIXER_[A-Za-z0-9_]*\)=.*/\1/p; s/^\(GIT_[A-Za-z0-9_]*\)=.*/\1/p'); do
     case $v in DECK_TEST_SRC|DECK_SRC) ;; *) unset "$v" ;; esac
   done
-  unset CLAUDE_CONFIG_DIR CODEX_HOME GROK_HOME TMUX PI_CODING_AGENT PI_CODING_AGENT_DIR
+  unset CLAUDE_CONFIG_DIR CODEX_HOME GROK_HOME TMUX PI_CODING_AGENT PI_CODING_AGENT_DIR CLAUDECODE
 
   T=$(mktemp -d "${TMPDIR:-/tmp}/deck-test.XXXXXX") || exit 1
   T=$(cd "$T" && pwd -P)
   DECK=$T/deck
   mkdir -p "$DECK/config" "$DECK/data/jobs" "$DECK/data/projects" "$DECK/state" \
-    "$T/home" "$T/stubs" "$T/tools" "$T/worktrees" "$T/herdr/agents" "$T/forge"
+    "$T/home" "$T/stubs" "$T/tools" "$T/worktrees" "$T/herdr/agents" "$T/forge" "$T/rex/windows" "$T/rex/blocks"
   cp -R "$DECK_SRC/bin" "$DECK/bin"
   cp -R "$DECK_SRC/templates" "$DECK/templates"
   printf 'client_name=tester\nworker_harness=claude\nnotify=on\n' >"$DECK/config/deck.conf"
@@ -47,6 +47,8 @@ sandbox() {
   export DECK_WORKTREES="$T/worktrees"
   export DECK_WAIT_INTERVAL=1
   export STUB_DIR="$T"
+  export DECK_REX_APP_BIN="$T/no-rex-app"   # never fall back to a real Rex install
+  export DECK_REX_PASTE_SETTLE=0
   export GIT_CONFIG_NOSYSTEM=1
   git config --global user.name "deck test"
   git config --global user.email "test@example.invalid"
@@ -103,12 +105,89 @@ case "${1:-} ${2:-}" in
       printf '{"error":{"code":"%s"}}\n' "$(cat "$STUB_DIR/herdr/prompt-fails")"; exit 1
     fi ;;
   "notification show") ;;
+  "agent read") [ -f "$a/$3" ] || { echo '{"error":{"code":"agent_not_found"}}'; exit 1; }; echo "herdr screen of $3" ;;
   "pane get")
     # $STUB_DIR/herdr/panes/<pane> holds that pane's workspace id; others are the operator's.
     w=ws-operator
     [ ! -f "$STUB_DIR/herdr/panes/$3" ] || w=$(cat "$STUB_DIR/herdr/panes/$3")
     printf '{"result":{"pane":{"workspace_id":"%s"}}}\n' "$w" ;;
   *) echo "herdr stub: unhandled: $*" >&2; exit 1 ;;
+esac
+EOF
+  cat >"$T/stubs/rex" <<'EOF'
+#!/bin/bash
+# rex stub. Windows are $STUB_DIR/rex/windows/<n> holding their label; window
+# "window:<n>" holds block "block:<n>", whose $STUB_DIR/rex/blocks/<n> holds
+# the program's reported state: idle|working|done|blocked|blocked:<kind>|error,
+# silent (running, no report), or exited (a --keep-open tab whose program ended).
+# New tabs start in the state in $STUB_DIR/rex/start-state (default idle).
+printf 'rex %s\n' "$*" >>"$STUB_DIR/calls.log"
+r="$STUB_DIR/rex"
+args=() blk=""
+while [ $# -gt 0 ]; do
+  case $1 in
+    -s|-c) shift 2 ;;
+    -b) blk=$2; shift 2 ;;
+    --json|--keep-open|--focus=false|--trim|--unwrap) shift ;;
+    --) shift; args+=(-- "$@"); break ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+set -- "${args[@]+"${args[@]}"}"
+n=${blk#block:}
+case "${1:-} ${2:-}" in
+  "whoami "*) echo '{"rex_version":"0.1.0-preview.15","api_revision":13}' ;;
+  "ls "*)
+    if [ -f "$r/sessions.json" ]; then cat "$r/sessions.json"; else echo '{"sessions":[]}'; fi ;;
+  "session inspect") [ ! -f "$r/no-session" ] || { echo "Error: session not found" >&2; exit 3; }; echo '{}' ;;
+  "window new"|"new "*)
+    c=$(cat "$r/counter" 2>/dev/null || echo 0); c=$((c + 1)); echo $c >"$r/counter"
+    if [ "$1" = new ]; then label=${2:-}; else label=${3:-}; fi
+    printf '%s\n' "$label" >"$r/windows/$c"
+    st=idle; [ ! -f "$r/start-state" ] || st=$(cat "$r/start-state")
+    printf '%s\n' "$st" >"$r/blocks/$c"
+    if [ "$1" = new ]; then
+      printf '{"session_id":"session:new","initial_windows":[{"window_id":"window:%s","block_ids":["block:%s"]}]}\n' $c $c
+    else
+      printf '{"window_id":"window:%s","block_ids":["block:%s"]}\n' $c $c
+    fi ;;
+  "window ls")
+    printf '{"windows":['
+    sep=""
+    for f in "$r/windows/"*; do
+      [ -f "$f" ] || continue
+      w=$(basename "$f")
+      printf '%s{"window_id":"window:%s","label":"%s","layers":[{"blocks":[{"block_id":"block:%s"}]}]}' "$sep" "$w" "$(cat "$f")" "$w"
+      sep=,
+    done
+    printf ']}\n' ;;
+  "window close") w=${3#window:}; rm -f "$r/windows/$w" "$r/blocks/$w" ;;
+  "block call")
+    [ -f "$r/blocks/$n" ] || { echo "Error: block target \"$blk\" not found" >&2; exit 3; }
+    st=$(cat "$r/blocks/$n")
+    case $3 in
+      process)
+        if [ "$st" = exited ]; then echo '{"child":null,"foreground":null,"last_exit":{"exit_code":0}}'
+        else echo '{"child":{"pid":4242,"name":"claude"},"foreground":{"pid":4242,"name":"claude"},"last_exit":null}'; fi ;;
+      program_status)
+        case $st in
+          exited|silent) echo '{"records":[]}' ;;
+          blocked:*) printf '{"records":[{"state":"blocked","kind":"%s","updated_at":"2026-01-01T00:00:01Z"}]}\n' "${st#blocked:}" ;;
+          *) printf '{"records":[{"state":"%s","updated_at":"2026-01-01T00:00:01Z"}]}\n' "$st" ;;
+        esac ;;
+      *) echo "rex stub: unhandled block method $3" >&2; exit 1 ;;
+    esac ;;
+  "api call")
+    in=$(cat)
+    printf 'rex-stdin %s\n' "$in" >>"$STUB_DIR/calls.log"
+    case $3 in
+      block.event) [ ! -f "$r/prompt-fails" ] || { echo "Error: failed" >&2; exit 1; } ;;
+    esac
+    echo '{}' ;;
+  "send-key "*) [ -f "$r/blocks/$n" ] || exit 3 ;;
+  "capture "*) [ -f "$r/blocks/$n" ] || exit 3; printf 'screen of %s\nlast line\n' "$blk" ;;
+  "focus "*|"kill "*) ;;
+  *) echo "rex stub: unhandled: $*" >&2; exit 1 ;;
 esac
 EOF
   cat >"$T/stubs/gh" <<'EOF'
@@ -209,6 +288,12 @@ run() { # <cmd> [args...]   capture output and status instead of failing
   rc=0
   "$DECK/bin/deck-$cmd" "$@" >"$T/out" 2>&1 </dev/null || rc=$?
   OUT=$(cat "$T/out")
+}
+
+# Rex helpers: the block number of a job's tab, and setting what its program reports.
+rex_block_of() { local b; b=$(job_value "$1" pane); printf '%s\n' "${b#block:}"; }
+rex_state() { # <id> <state>
+  printf '%s\n' "$2" >"$T/rex/blocks/$(rex_block_of "$1")"
 }
 
 conf_value() { grep -E "^$2=" "$1" 2>/dev/null | tail -n1 | cut -d= -f2-; }

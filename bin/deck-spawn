@@ -1,22 +1,27 @@
 #!/usr/bin/env bash
 # deck-spawn: hire a worker for a queued job.
 #
-#   deck-spawn <id>            create worktree + Herdr workspace, start the worker, send the brief
+#   deck-spawn <id>            create worktree + worker space, start the worker, send the brief
 #   deck-spawn <id> --resume   after the user cleared a startup dialog by hand: just send the brief
 #   deck-spawn <id> --relaunch [--note "<progress>"]
 #                              the worker is gone (or is being replaced): start a new one in the
 #                              same worktree and branch, telling it what happened so far
 #
-# Steps: git worktree add (branch deck/<id>) -> herdr workspace create ->
-# herdr agent start --kind <harness> -> herdr agent prompt "read your brief".
-# Each job owns exactly one Herdr workspace, labelled "└ <id>" and moved into
-# the block right after the operator's workspace (best-effort). The Herdr agent
-# name is the bare job id.
+# The worker runs in the multiplexer chosen by mux= in config/deck.conf (or
+# DECK_MUX), recorded in the job as mux= (see bin/deck-mux.sh):
+#   herdr: git worktree add (branch deck/<id>) -> herdr workspace create ->
+#          herdr agent start --kind <harness> -> herdr agent prompt "read your brief".
+#          The Herdr agent name is the bare job id.
+#   rex:   git worktree add -> rex window new (a tab running the harness) ->
+#          wait for it to report ready -> paste "read your brief" + Return.
+# Each job owns exactly one worker space (Herdr workspace or Rex tab), labelled
+# "└ <id>" and moved right after the operator's own (best-effort).
 #
-# --relaunch refuses while a live agent still holds the job's name in Herdr. It
-# never touches the worktree or branch. It reuses the job's pane when that pane
-# and its "└ <id>" workspace still exist, else creates a new workspace placed
-# like a normal spawn. The job record changes only once the new worker is up;
+# --relaunch refuses while a live worker still holds the job. It never touches
+# the worktree or branch. Under Herdr it reuses the job's pane when that pane
+# and its "└ <id>" workspace still exist; under Rex it closes the job's old tab
+# (its program has exited) and opens a new one. Otherwise it creates a new
+# space placed like a normal spawn. The job record changes only once the new worker is up;
 # if the start fails, the record stays as it was (and a workspace created for
 # the attempt is closed). If the new worker stops at a startup dialog, the job
 # goes to 'starting' and --resume finishes the relaunch.
@@ -36,15 +41,19 @@ done
 [ $resume = 1 ] && [ $relaunch = 1 ] && die "use either --resume or --relaunch, not both"
 [ -z "$note" ] || [ $relaunch = 1 ] || die "--note only goes with --relaunch"
 
-need git; need jq; need herdr
-[ "${HERDR_ENV:-}" = 1 ] || die "the operator is not running inside Herdr; start herdr in the deck directory and launch your agent inside it"
+need git; need jq
 
 dir=$(job_dir "$id")
 status=$(job_get "$id" status)
 harness=$(job_get "$id" harness)
 valid_harness "$harness" || die "job $id's harness '$harness' can't run a worker (worker harnesses: $DECK_HARNESSES)"
 wt=$(job_get "$id" worktree)
-created_ws=""   # a workspace this run created; closed again if a relaunch fails
+created_ws=""   # a worker space this run created; closed again if a relaunch fails
+
+# The mux: a job keeps the one it was first spawned under.
+if [ $resume = 0 ] && [ $relaunch = 0 ]; then mux=$(mux_name) || exit 1; else mux=$(job_mux "$id"); fi
+mux_require_ready "$mux"
+space=$(mux_space "$mux")
 
 # Pi's launch arguments, worked out before anything is created so a refusal
 # leaves nothing behind. Pi never asks before a tool runs, so there is no
@@ -77,11 +86,11 @@ if [ "$harness" = pi ] && command -v pi >/dev/null 2>&1; then
   fi
 fi
 
-# On a failed relaunch start, put things back: close the workspace we made and
+# On a failed relaunch start, put things back: close the space we made and
 # leave the job record untouched.
 start_failed() { # <message>
   if [ $relaunch = 1 ] && [ -n "$created_ws" ]; then
-    herdr workspace close "$created_ws" >/dev/null 2>&1 || warn "could not close Herdr workspace $created_ws"
+    mux_ws_close "$id" "$created_ws" || warn "could not close $space $created_ws"
   fi
   die "$1"
 }
@@ -97,28 +106,23 @@ if [ $relaunch = 1 ]; then
   [ -d "$wt" ] || die "worktree $wt is gone; nothing to relaunch into"
   [ "$(git -C "$wt" symbolic-ref --short HEAD 2>/dev/null)" = "$(job_get "$id" branch)" ] ||
     die "worktree $wt is not on branch $(job_get "$id" branch); refusing to relaunch into it"
-  if herdr agent get "$id" >/dev/null 2>&1; then
-    die "a live agent still owns job $id in Herdr. Steer it with bin/deck-tell $id --interrupt \"<message>\", or have the user quit it in workspace $(worker_ws_label "$id") first"
+  if mux_agent_exists "$id"; then
+    die "a live agent still owns job $id in $(mux_title "$mux"). Steer it with bin/deck-tell $id --interrupt \"<message>\", or have the user quit it in $space $(worker_ws_label "$id") first"
   fi
 
-  # Reuse the old pane if it and its workspace are still there.
+  # Herdr: reuse the old pane if it and its workspace are still there. Rex:
+  # close the old tab (its program has exited); the start opens a new one.
   old_ws=$(job_get "$id" workspace) old_pane=$(job_get "$id" pane)
   ws="" pane=""
-  if [ -n "$old_ws" ] && [ -n "$old_pane" ]; then
-    label=$(herdr workspace list 2>/dev/null | jq -r --arg w "$old_ws" '.result.workspaces[] | select(.workspace_id == $w) | .label' 2>/dev/null)
-    pws=$(herdr pane get "$old_pane" 2>/dev/null | jq -r '.result.pane.workspace_id // empty' 2>/dev/null)
-    if { [ "$label" = "$(worker_ws_label "$id")" ] || [ "$label" = "$id" ]; } && [ "$pws" = "$old_ws" ]; then
-      ws=$old_ws pane=$old_pane
-    fi
+  if [ "$mux" = rex ]; then
+    [ -z "$old_ws" ] || mux_ws_close_if_ours "$id" "$old_ws"
+  elif [ -n "$old_ws" ] && [ -n "$old_pane" ] && mux_ws_reusable "$id" "$old_ws" "$old_pane"; then
+    ws=$old_ws pane=$old_pane
   fi
-  if [ -z "$pane" ]; then
-    out=$(herdr workspace create --cwd "$wt" --label "$(worker_ws_label "$id")" --no-focus \
-      --env "DECK_JOB=$id" --env "DECK_HOME=$DECK_ROOT" --env "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false" 2>&1) \
-      || die "herdr workspace create failed: $out"
-    ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id')
-    pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id')
+  if [ -z "$pane" ] && [ "$mux" = herdr ]; then
+    mux_ws_create "$id" "$wt" || die "herdr workspace create failed: $MUX_OUT"
+    ws=$MUX_WS pane=$MUX_PANE
     created_ws=$ws
-    group_worker_workspace "$ws"
   fi
 elif [ $resume = 0 ]; then
   [ "$status" = queued ] || die "job $id is $status, not queued"
@@ -146,31 +150,35 @@ elif [ $resume = 0 ]; then
   job_set "$id" worktree "$wt"
   job_set "$id" base_sha "$(git -C "$wt" rev-parse HEAD)"
 
-  out=$(herdr workspace create --cwd "$wt" --label "$(worker_ws_label "$id")" --no-focus \
-    --env "DECK_JOB=$id" --env "DECK_HOME=$DECK_ROOT" --env "CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=false" 2>&1) \
-    || die "herdr workspace create failed: $out (worktree left at $wt)"
-  ws=$(printf '%s' "$out" | jq -r '.result.workspace.workspace_id')
-  pane=$(printf '%s' "$out" | jq -r '.result.root_pane.pane_id')
+  job_set "$id" mux "$mux"
+  [ "$mux" != rex ] || job_set "$id" mux_session "$(rex_session)"
+  mux_ws_create "$id" "$wt" || die "herdr workspace create failed: $MUX_OUT (worktree left at $wt)"
+  ws=$MUX_WS pane=$MUX_PANE
   job_set "$id" workspace "$ws"
   job_set "$id" pane "$pane"
-  group_worker_workspace "$ws"
   job_set "$id" status starting
 else
   [ "$status" = starting ] || die "--resume is only for a job stuck in 'starting' (job $id is $status)"
   pane=$(job_get "$id" pane)
   ws=$(job_get "$id" workspace)
-  if [ "$(herdr agent get "$id" 2>/dev/null | jq -r '.result.agent.agent_status // empty')" = blocked ]; then
-    die "worker $id is still at a dialog in Herdr workspace $ws; ask the user to answer it there, then rerun with --resume"
+  ast=$(mux_agent_status "$id")
+  if [ "${ast%% *}" = blocked ]; then
+    die "worker $id is still at a dialog in $space $ws; ask the user to answer it there, then rerun with --resume"
   fi
 fi
 
 # Start the agent unless one is already in the pane (a --resume after the
 # user answered a startup dialog by hand).
-if ! herdr agent get "$id" >/dev/null 2>&1; then
+if ! mux_agent_exists "$id"; then
   case $harness in
     claude)
       set -- --permission-mode "$(conf_get "$DECK_CONF" claude_permission_mode auto)" \
-        --add-dir "$dir" --append-system-prompt-file "$DECK_ROOT/templates/worker-system.md" -n "$id" ;;
+        --add-dir "$dir" --append-system-prompt-file "$DECK_ROOT/templates/worker-system.md" -n "$id"
+      # Claude Code reports its own status to Rex (OSC 7501). For a Claude Code
+      # that doesn't, rex_claude_hooks=on adds hooks that report it instead.
+      if [ "$mux" = rex ] && [ "$(conf_get "$DECK_CONF" rex_claude_hooks off)" = on ]; then
+        set -- "$@" --settings "$DECK_ROOT/templates/rex-claude-hooks.json"
+      fi ;;
     codex)
       # A linked worktree's git dir (<common>/worktrees/<name>) and its objects
       # and refs (<common>) live outside the worktree, and Codex keeps a
@@ -189,24 +197,42 @@ if ! herdr agent get "$id" >/dev/null 2>&1; then
       set -- ${pi_args[@]+"${pi_args[@]}"} ;;
   esac
 
-  # A brand-new pane's shell may still be starting up; wait for its prompt.
-  tries=0
-  while :; do
-    out=$(herdr agent start "$id" --kind "$harness" --pane "$pane" --timeout 90000 -- "$@" 2>&1) && break
-    code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
-    if [ "$code" = agent_pane_busy ] && [ $tries -lt 30 ]; then tries=$((tries + 1)); sleep 1; continue; fi
-    if [ "$code" = agent_not_ready ]; then
+  # Herdr: a brand-new pane's shell may still be starting up; this waits for
+  # its prompt. Rex: this opens the tab and waits for the harness to be ready.
+  started=0
+  mux_agent_start "$id" "$harness" "$pane" "$wt" "$@" && started=1
+  if [ "$mux" = rex ] && [ -n "$MUX_PANE" ]; then
+    ws=$MUX_WS pane=$MUX_PANE
+    [ $relaunch = 1 ] && created_ws=$ws
+    # Record the new tab once there is a worker in it (a fresh spawn: at once),
+    # so the brief, --resume and teardown reach it.
+    if [ $relaunch = 0 ] || [ $started = 1 ] || [ "$MUX_ERR" = agent_not_ready ]; then
+      job_set "$id" workspace "$ws"; job_set "$id" pane "$pane"
+    fi
+  fi
+  if [ $started = 0 ]; then
+    if [ "$MUX_ERR" = agent_not_ready ]; then
       if [ $relaunch = 1 ]; then
         # The agent is up but at a dialog: record it so --resume can finish the relaunch.
         job_set "$id" workspace "$ws"; job_set "$id" pane "$pane"
         job_set "$id" relaunch_pending 1; job_set "$id" relaunch_note "$note"
         job_set "$id" status starting
       fi
-      die "worker $id is stopped at a startup dialog in Herdr workspace $ws ($(worker_ws_label "$id")). Read it with: herdr pane read $pane --source visible --lines 40. Ask the user to answer it there, then run: bin/deck-spawn $id --resume"
+      if [ "$mux" = rex ]; then readhint="bin/deck-peek $id"; else readhint="herdr pane read $pane --source visible --lines 40"; fi
+      die "worker $id is stopped at a startup dialog in $space $ws ($(worker_ws_label "$id")). Read it with: $readhint. Ask the user to answer it there, then run: bin/deck-spawn $id --resume"
     fi
-    if [ $relaunch = 1 ]; then start_failed "herdr agent start failed: $out. The job record is unchanged; fix the cause, then retry: bin/deck-spawn $id --relaunch"; fi
-    die "herdr agent start failed: $out. Fix the cause, then retry with: bin/deck-spawn $id --resume"
-  done
+    if [ $relaunch = 1 ]; then
+      if [ "$mux" = herdr ]; then what="herdr agent start failed"; else what="$harness failed to start in Rex"; fi
+      start_failed "$what: $MUX_OUT. The job record is unchanged; fix the cause, then retry: bin/deck-spawn $id --relaunch"
+    fi
+    if [ "$mux" = herdr ]; then
+      die "herdr agent start failed: $MUX_OUT. Fix the cause, then retry with: bin/deck-spawn $id --resume"
+    fi
+    # Rex: nothing is running in the tab; close it so a retry starts clean.
+    [ -z "$ws" ] || mux_ws_close "$id" "$ws" || true
+    job_set "$id" workspace ""; job_set "$id" pane ""
+    die "$harness failed to start in Rex: $MUX_OUT. Fix the cause, then retry with: bin/deck-spawn $id --resume"
+  fi
 fi
 
 # A relaunch (or a --resume that finishes one) gets a preamble on top of the brief.
@@ -227,9 +253,8 @@ $(tail -n 40 "$dir/messages.log")"
 else
   msg="You are worker $id, hired by deck. Read your brief at $dir/brief.md and follow it exactly. Start now."
 fi
-out=$(herdr agent prompt "$id" "$msg" --wait --timeout 20000 2>&1)
-rc=$?
-code=$(printf '%s' "$out" | jq -r '.error.code // empty' 2>/dev/null)
+mux_agent_prompt "$id" "$msg" 20000
+rc=$? code=$MUX_ERR out=$MUX_OUT
 # A timeout here is the good case: the worker is still working on the job.
 if [ $rc -ne 0 ] && [ "$code" != timeout ]; then
   if [ $relaunch = 1 ]; then
@@ -263,5 +288,9 @@ fi
 job_set "$id" status running
 verb=spawned
 [ "$pending" = 1 ] && verb=relaunched
-echo "$verb $id: harness=$harness workspace=$ws pane=$pane worktree=$wt"
+if [ "$mux" = rex ]; then
+  echo "$verb $id: harness=$harness mux=rex tab=$ws block=$pane worktree=$wt"
+else
+  echo "$verb $id: harness=$harness workspace=$ws pane=$pane worktree=$wt"
+fi
 echo "next: make sure a watcher is running (bin/deck-wait)"

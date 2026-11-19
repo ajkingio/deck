@@ -5,6 +5,13 @@
 #   deck-launch --new     replace any existing session without asking first
 #                          (still confirms if workers are live)
 #
+# With mux=rex (config/deck.conf, or DECK_MUX): no Herdr. Run from inside Rex,
+# it opens a tab labelled "deck" in the current Rex session ($REX_SESSION) at
+# this repo, starts the operator's harness there and greets it; deck's workers
+# then open as "└ <id>" tabs beside it. Run outside Rex, it creates a Rex
+# session (config rex_session, default deck) with that tab; open it from Rex's
+# session list. An existing "deck" tab or session is offered to be reused.
+#
 # Fresh start: a headless Herdr server for the session (default name: deck),
 # one workspace at this repo, the operator's harness (deck_harness: claude,
 # codex, grok or pi) started there with the opening line ("jacking in"), then
@@ -14,8 +21,9 @@
 # listed and must be confirmed. Worktrees and job records on disk are kept.
 . "$(dirname "$0")/deck-lib.sh"
 
-need herdr; need jq
+need jq
 [ -f "$DECK_CONF" ] || die "deck isn't set up yet; run $DECK_ROOT/setup first"
+mux=$(mux_name) || exit 1
 
 session=$(conf_get "$DECK_CONF" herdr_session deck)
 harness=$(cfg_get deck_harness fixer_harness claude)
@@ -26,8 +34,6 @@ command -v "$harness" >/dev/null 2>&1 || die "$harness is not installed"
 force_new=0
 [ "${1:-}" = --new ] && force_new=1
 
-H() { herdr --session "$session" "$@"; }
-
 ask() { # <prompt> -> reply on stdout
   local r
   printf '%s' "$1" >/dev/tty
@@ -35,19 +41,107 @@ ask() { # <prompt> -> reply on stdout
   printf '%s\n' "$r"
 }
 
+live_workers() { # job ids this home thinks are live
+  local id
+  for id in $(job_ids); do
+    case $(job_get "$id" status) in starting|running|blocked) printf '%s\n' "$id" ;; esac
+  done
+}
+
+# ---------------------------------------------------------------- Rex
+
+# Start the operator in a new "deck" tab of session <s> (or a new session
+# labelled <s> when <new-session> is 1), and greet it from the background once
+# it is ready.
+rex_start_operator() { # <session> <new-session>
+  local s=$1 out b exe
+  exe=$(command -v "$harness")
+  if [ "$2" = 1 ]; then
+    out=$(rexc new "$s" -c "$DECK_ROOT" --window deck --keep-open --json -- "$exe" 2>&1) || die "could not create the Rex session '$s': $out"
+    b=$(printf '%s' "$out" | jq -r '.initial_windows[0].block_ids[0] // empty')
+    s=$(printf '%s' "$out" | jq -r '.session_id // empty')
+  else
+    out=$(rexc window new -s "$s" deck -c "$DECK_ROOT" --keep-open --json -- "$exe" 2>&1) || die "could not open a deck tab in Rex: $out"
+    b=$(printf '%s' "$out" | jq -r '.block_ids[0] // empty')
+  fi
+  [ -n "$b" ] || die "Rex didn't say which terminal it opened: $out"
+  # Greet once the operator is ready: right away, or after the user answers a
+  # startup dialog (up to 10 minutes).
+  (
+    DECK_REX_START_TRIES=600
+    i=0
+    while [ $i -lt 600 ]; do
+      if rex_wait_ready "$s" "$b" "$harness"; then rex_paste_enter "$s" "$b" "$greeting"; exit 0; fi
+      [ "$MUX_ERR" = agent_not_ready ] || exit 0   # it exited
+      i=$((i + 5)); sleep 5
+    done
+  ) >/dev/null 2>&1 &
+}
+
+rex_launch() {
+  rex_bin >/dev/null || die "rex is not installed (no rex on PATH, no $DECK_REX_APP_BIN; set rex_bin= in config/deck.conf)"
+  local s tab reply live
+  if [ -n "${REX_SESSION:-}" ]; then
+    s=$REX_SESSION
+    tab=$(rexc window ls -s "$s" --json 2>/dev/null | jq -r '[.windows[]? | select(.label == "deck")][0].window_id // empty')
+    if [ -n "$tab" ] && [ $force_new = 0 ]; then
+      reply=$(ask "This Rex session already has a 'deck' tab. [o]pen it, start a [n]ew one, or [c]ancel? [o] ")
+      case $reply in
+        ""|o|O|open) rexc focus -s "$s" "$tab" >/dev/null 2>&1 || true; echo "switched to the 'deck' tab"; exit 0 ;;
+        n|N|new) ;;
+        *) echo "cancelled"; exit 0 ;;
+      esac
+    fi
+    if [ -n "$tab" ]; then
+      echo "Closing the old 'deck' tab stops its operator; workers keep running in their own tabs."
+      rexc window close -s "$s" "$tab" >/dev/null 2>&1 || die "could not close the old 'deck' tab"
+    fi
+    echo "starting $harness in a new 'deck' tab..."
+    rex_start_operator "$s" 0
+    echo "ready: the 'deck' tab in this Rex session"
+    exit 0
+  fi
+  # Outside Rex: a session of its own.
+  s=$(conf_get "$DECK_CONF" rex_session deck)
+  if rexc ls --json 2>/dev/null | jq -e --arg n "$s" '.sessions[]? | select(.label == $n or .session_id == $n)' >/dev/null 2>&1; then
+    if [ $force_new = 0 ]; then
+      echo "A Rex session named '$s' already exists."
+      reply=$(ask "  [o]pen it, start a [n]ew one, or [c]ancel? [o] ")
+      case $reply in
+        ""|o|O|open) echo "Open the '$s' session from Rex's session list (it's already running)."; exit 0 ;;
+        n|N|new) ;;
+        *) echo "cancelled"; exit 0 ;;
+      esac
+    fi
+    live=$(live_workers)
+    if [ -n "$live" ]; then
+      echo "These workers are live in '$s'. Replacing the session stops them mid-job:"
+      printf '  - %s\n' $live
+      echo "Their worktrees and job records stay on disk; the operator will report them as gone."
+      reply=$(ask "  Type 'replace' to stop them and start fresh: ")
+      [ "$reply" = replace ] || { echo "cancelled; nothing changed"; exit 0; }
+    fi
+    rexc kill "$s" >/dev/null 2>&1 || die "could not stop the old '$s' session"
+  fi
+  echo "starting Rex session '$s' and $harness..."
+  rex_start_operator "$s" 1
+  echo "ready: open the '$s' session from Rex's session list"
+  exit 0
+}
+
+if [ "$mux" = rex ]; then rex_launch; fi
+
+# ---------------------------------------------------------------- Herdr
+
+need herdr
+H() { herdr --session "$session" "$@"; }
+
 session_exists() {
   herdr session list --json 2>/dev/null | jq -e --arg n "$session" '.sessions[] | select(.name == $n)' >/dev/null 2>&1
 }
 
 session_running() {
   herdr session list --json 2>/dev/null | jq -e --arg n "$session" '.sessions[] | select(.name == $n and .running == true)' >/dev/null 2>&1
-}
-
-live_workers() { # job ids this home thinks are live
-  local id
-  for id in $(job_ids); do
-    case $(job_get "$id" status) in starting|running|blocked) printf '%s\n' "$id" ;; esac
-  done
 }
 
 attach() {

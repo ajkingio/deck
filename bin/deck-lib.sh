@@ -113,19 +113,21 @@ valid_harness() { case " $DECK_HARNESSES " in *" $1 "*) return 0 ;; esac; return
 valid_operator_harness() { case " $DECK_OPERATOR_HARNESSES " in *" $1 "*) return 0 ;; esac; return 1; }
 
 # The harness the operator itself is running in, as Herdr sees it (or, failing
-# that, pi when Pi's shell tool set PI_CODING_AGENT).
+# that, pi when Pi's shell tool set PI_CODING_AGENT). Under Rex, which doesn't
+# name agents: claude when Claude Code's shell tool set CLAUDECODE.
 operator_harness() {
   local h=""
   if [ "${HERDR_ENV:-}" = 1 ] && [ -n "${HERDR_PANE_ID:-}" ] && command -v herdr >/dev/null 2>&1; then
     h=$(herdr agent get "$HERDR_PANE_ID" 2>/dev/null | jq -r '.result.agent.agent // empty' 2>/dev/null)
   fi
   [ -n "$h" ] || [ "${PI_CODING_AGENT:-}" != true ] || h=pi
+  if [ -z "$h" ] && [ "${CLAUDECODE:-}" = 1 ] && [ "$(mux_name 2>/dev/null)" = rex ]; then h=claude; fi
   printf '%s\n' "$h"
 }
 
-# Herdr workspaces -------------------------------------------------------------
+# Worker spaces ----------------------------------------------------------------
 
-# Worker workspaces are labelled "└ <job-id>" and grouped in a block right
+# Worker workspaces (Herdr) and tabs (Rex) are labelled "└ <job-id>" and grouped in a block right
 # after the operator's workspace, so they read as its children. Herdr has no
 # nested workspaces; this is presentation only. The Herdr agent name stays
 # the bare job id.
@@ -224,3 +226,7 @@ fm_get() { # <file> <key>
 
 # Body of a markdown file without its frontmatter.
 fm_body() { awk 'NR == 1 && $0 == "---" { fm = 1; next } fm && $0 == "---" { fm = 0; next } !fm' "$1"; }
+
+# multiplexers -------------------------------------------------------------------
+
+. "$DECK_BIN/deck-mux.sh"

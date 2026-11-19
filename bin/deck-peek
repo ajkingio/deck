@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# deck-peek: print the recent screen of a worker, under Herdr or Rex.
+#
+#   deck-peek <id> [--lines <n>]     default 80 lines
+#
+# Herdr: herdr agent read <id> --source recent-unwrapped. Rex: rex capture of
+# the job's tab (--trim --unwrap), which also works after the worker exited,
+# since deck opens worker tabs with --keep-open. Read-only.
+. "$(dirname "$0")/deck-lib.sh"
+
+id=${1:-}; shift || true
+require_job "$id"
+lines=80
+while [ $# -gt 0 ]; do
+  case $1 in
+    --lines) [ $# -ge 2 ] || die "--lines needs a value"; lines=$2; shift 2 ;;
+    *) die "unknown option: $1" ;;
+  esac
+done
+case $lines in ''|*[!0-9]*) die "--lines takes a number" ;; esac
+need jq
+
+case $(job_mux "$id") in
+  herdr) need herdr ;;
+  rex)
+    rex_bin >/dev/null || die "rex is not installed"
+    [ -n "$(job_get "$id" pane)" ] || die "job $id has no Rex tab recorded"
+    ;;
+esac
+mux_agent_read "$id" "$lines" || die "could not read worker $id's screen"

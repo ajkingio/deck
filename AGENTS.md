@@ -41,16 +41,16 @@ A current, explicit instruction from the user overrides a conflicting rule above
 - *Intent / Question*: the user's ask in their own words, plus the context a stranger needs (including the substance of any earlier report or PR it refers to). Do not widen it.
 - *Spec / Scope*: only what that ask requires, and what is out of scope.
 
-**Spawn.** `bin/deck-spawn <id>`. Then make sure a watcher is running. Tell the user in one line what you hired and where to watch (the Herdr workspace is labelled `└ <id>`, grouped right after the operator's own).
+**Spawn.** `bin/deck-spawn <id>`. Then make sure a watcher is running. Tell the user in one line what you hired and where to watch (the worker's Herdr workspace, or Rex tab, is labelled `└ <id>`, grouped right after the operator's own).
 
 **Parallel work.** Independent requests get separate jobs and run at the same time. Don't spawn two gigs that will edit the same files at once; queue the second.
 
 **Report.** Workers report `done`, `blocked`, or `failed` through `deck-report`, and write `report.md`.
 - `blocked`: if you can answer from the brief, the profile, or engrams, answer with `bin/deck-tell <id> "<answer>"`. Otherwise ask the user, then relay.
-- `dialog` (Herdr sees an approval/question UI): read it with `herdr agent read <id> --source recent-unwrapped --lines 80`. Approve nothing destructive or outside the job on your own; ask the user.
+- `dialog` (the multiplexer sees an approval/question UI): read it with `bin/deck-peek <id>`. Approve nothing destructive or outside the job on your own; ask the user.
 - `idle` (stopped without reporting): read the pane, then nudge with `deck-tell` or treat as failed.
 - `gone` (the job's status becomes `gone`): say so; offer to relaunch it in place with `bin/deck-spawn <id> --relaunch --note "<progress so far>"`, which keeps its worktree, branch and commits.
-- A worker that is stuck or looping: climb one step at a time. Read the pane (`herdr agent read <id> --source recent-unwrapped --lines 80`) → answer from the brief with `deck-tell` → `bin/deck-tell <id> --interrupt "<one corrective line>"` → `deck-spawn <id> --relaunch` → treat as failed and tell the user.
+- A worker that is stuck or looping: climb one step at a time. Read the pane (`bin/deck-peek <id>`) → answer from the brief with `deck-tell` → `bin/deck-tell <id> --interrupt "<one corrective line>"` → `deck-spawn <id> --relaunch` → treat as failed and tell the user.
 - `done`: read `report.md`. For a gig, nothing has been pushed yet: show the user the result, risk, the diff summary (`git -C <worktree> log --stat <base>..HEAD`), and the drafted `pr-title.txt` / `pr-body.md`, then ask whether to open the PR/MR. Changes they want go back to the worker via `deck-tell`, which sets the job back to `running`; start a watcher. For recon, give the answer and any open decisions.
 
 **Open.** `pr` mode only, and only on the user's explicit word: `bin/deck-open <id>` pushes the branch and opens the PR/MR (or, if one is open, pushes the worker's new commits to it; that needs the user's word too). Report the link and CI (`deck-forge -C <worktree> status`).
@@ -67,6 +67,8 @@ A current, explicit instruction from the user overrides a conflicting rule above
 - **Pi**: deck's extension (`.pi/extensions/deck-operator.ts`) runs the watcher and delivers its events to you as a message; don't run `bin/deck-wait` yourself. It also enforces hard rule 1: it blocks your writes to projects and to deck's tracked files (only `config/`, `data/`, `state/`, and `learned/` and `.agents/skills/` for an accepted `/defrag` proposal are writable).
 
 Herdr notifications are shown automatically for events that need the user.
+
+**Multiplexer.** deck drives workers through Herdr (the default) or Rex: `mux=herdr|rex` in `config/deck.conf`, overridden by `DECK_MUX`. Each job keeps the multiplexer it was spawned under. Everything above works the same under both; only where workers appear differs. Under Rex, each worker is a tab `└ <id>` in your Rex session, its state (working, at a dialog, done) is what its harness reports to Rex and shows in Rex's sidebar, and there are no Herdr notifications. Codex and Grok workers don't report state under Rex, so for them `deck-wait` only sees `gone`. `bin/deck-peek <id>` reads a worker's screen under either.
 
 ## 6. Talking to the user
 
